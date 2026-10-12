@@ -142,10 +142,27 @@ function renderQuestion() {
       <div class="bar blue" style="flex:1;max-width:320px"><i style="width:${s.i / s.total * 100}%"></i></div>
       <span class="badge gold">COMBO ×${s.combo}</span>
     </div>`;
+  s.qStart = Date.now();                       // 智能评分：记录本题开始时间
   h(head + `<div id="qbody">${q.html}</div>`);
   q.mount && q.mount();
 }
 
+/* 智能评分：答题速度感知 SM-2（秒答=真会→EF加成间隔跃迁；犹豫=假会→放慢节奏） */
+function speedGrade(g) {
+  if (g < 2 || !session || !session.qStart) return g;
+  const dt = (Date.now() - session.qStart) / 1000;
+  if (dt < 8) return 3;          // 8秒内答对：真会 → EF 加成，复习间隔大幅延长
+  if (dt <= 22) return 2;        // 正常节奏
+  return 1;                      // 超过22秒：犹豫作答 → 按“困难”调度，早点再见面
+}
+function speedNote(ok) {
+  if (!session || !session.qStart) return "";
+  const dt = Math.round((Date.now() - session.qStart) / 1000);
+  if (!ok) return `<br>⏱ 用时 ${dt}s`;
+  if (dt < 8) return `<br><b style="color:var(--green)">⚡ ${dt}s 秒答！真会 → 记忆间隔大幅延长</b>`;
+  if (dt > 22) return `<br><b style="color:var(--orange)">⏱ ${dt}s 犹豫作答 → 已放慢复习节奏，稍后会再见到它</b>`;
+  return `<br>⏱ 用时 ${dt}s`;
+}
 function answer(ok, explainHtml) {
   const s = session, body = document.getElementById("qbody");
   if (s.locked) return;
@@ -162,7 +179,7 @@ function answer(ok, explainHtml) {
     : pick(window.MASCOT.comfort);
   const emo = ok ? pick(["🎉", "⭐", "✨", "💪", "🌸"]) : pick(["🌱", "🩹", "📌", "🧩"]);
   const mc = `<div class="mascot-inline"><span class="mi-emo">${emo}</span><span>${line}</span></div>`;
-  const ex = explainHtml ? `<div class="explain">${explainHtml}</div>` : "";
+  const ex = `<div class="explain">${(explainHtml || "")}${speedNote(ok)}</div>`;
   body.insertAdjacentHTML("beforeend", mc + ex + `<div class="center mt"><button class="pixel-btn primary" onclick="nextQ()">${s.i + 1 >= s.total ? "查看结果 ▶" : "下一题 ▶"}</button></div>`);
   cheerPop(ok ? "+" + (10 + Math.min(s.combo - 1, 5) * 2) + " XP" : "がんばれ！", ok ? "#ffd166" : "#7ee2a8");
   s.after && s.after(ok);
@@ -391,7 +408,7 @@ function vocabQuestion(word) {
           if (opts[j].ok) x.classList.add("correct"); else if (j === i) x.classList.add("wrong");
         });
         const w = word;
-        if (i === ans) Store.srsGrade(w.w, 2);            // 答对=良好 → SM-2 间隔扩张
+        if (i === ans) Store.srsGrade(w.w, speedGrade(2));            // 答对=良好 → SM-2 间隔扩张
         else Store.srsGrade(w.w, 0);                      // 答错=重来 → 5分钟后回炉
         answer(i === ans, exp);
       });
@@ -669,7 +686,7 @@ function buildKanjiSession() {
         app.querySelectorAll(".opt").forEach(b => b.onclick = () => {
           const i = +b.dataset.i;
           app.querySelectorAll(".opt").forEach((x, j) => { x.disabled = true; if (j === ans) x.classList.add("correct"); else if (j === i) x.classList.add("wrong"); });
-          if (i === ans) Store.srsGrade(word.w, 2); else Store.srsGrade(word.w, 0);
+          if (i === ans) Store.srsGrade(word.w, speedGrade(2)); else Store.srsGrade(word.w, 0);
           const on = /[一-龥]/.test(word.w);
           answer(i === ans, `<span class="jp">${word.w}</span> → <span class="jp">${word.r}</span> ＝ ${word.m}<br><b>读音提示</b>：${on ? "音读为主——记住声旁规律（如「青」=せい，清/情/精同音）" : ""}反复出声读3遍，把字形和读音绑在一起。`);
         });
@@ -1233,6 +1250,18 @@ function practiceHub() {
     </div>`);
 }
 
+/* 智能预测：按模考趋势线性外推考试日得分（启发式，非官方口径） */
+function examPredict() {
+  const h = (Store.state.mockHistory || []).filter(x => typeof x.est === "number");
+  const days = Math.max(0, Store.daysLeft());
+  if (h.length < 2) return { ready: false, days };
+  const last = h[h.length - 1], prev = h[h.length - 2];
+  const dDays = Math.max(1, Math.round((new Date(last.d) - new Date(prev.d)) / 864e5));
+  const slope = (last.est - prev.est) / dDays;
+  const pred = Math.round(Math.min(180, Math.max(0, last.est + slope * days)));
+  const trend = slope > 0.4 ? "📈 上升" : slope < -0.4 ? "📉 下滑" : "➡️ 平稳";
+  return { ready: true, days, pred, slope: Math.round(slope * 10) / 10, trend, pass: pred >= 90, n: h.length };
+}
 function progressPage() {
   const sc = Store.scores(), st = Store.state;
   const es = st.errStats || {};
@@ -1274,6 +1303,14 @@ function progressPage() {
       <div class="pixel-panel center"><div class="stat"><span class="num">${mastery[1]}</span><span class="lab">学习中词汇（1级）</span></div></div>
       <div class="pixel-panel center"><div class="stat"><span class="num">${sc.unitDone}/8</span><span class="lab">通关单元</span></div></div>
     </div>
+    ${(() => { const p = examPredict(); return p.ready ? `
+    <div class="pixel-panel mb" style="border-color:${p.pass ? "var(--green)" : "var(--red)"}">
+      <div class="sec-title">🎯 考试预测 · 目标日 ${st.examDate}</div>
+      <p style="font-size:15px;line-height:2">近 ${p.n} 次模考趋势：<b>${p.trend}</b>（${p.slope > 0 ? "+" : ""}${p.slope} 分/天）<br>
+        距考试 <b style="color:var(--gold)">${p.days} 天</b> · 预计得分 <b style="font-size:28px;color:${p.pass ? "var(--green)" : "var(--red)"}">${p.pred}</b><span class="dim"> / 180</span>
+        ${p.pass ? `<span class="badge green">预计达线 ✅</span>` : `<span class="badge red">距 90 分达标线还差 ${Math.max(1, 90 - p.pred)} 分</span>`}</p>
+      <p class="dim" style="font-size:12px">${p.pass ? "保持当前节奏，错题按排程回归即可。" : "全勤每日计划 + 错题回归清零，是当前最稳的提分路径。"} · 启发式预测，非官方口径</p>
+    </div>` : `<div class="pixel-panel mb"><p class="dim center" style="font-size:13px">🎯 完成 2 次模考后解锁「考试预测」（按趋势外推你 12/06 的得分）</p></div>`; })()}
     ${(st.mockHistory || []).length ? `
     <div class="pixel-panel mb">
       <div class="sec-title">📈 模考估分趋势 · 近 ${st.mockHistory.length} 次（180分制·非官方口径）</div>
