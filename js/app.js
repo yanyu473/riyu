@@ -267,7 +267,7 @@ const REAL = t => [...(window.REALQ_N2 || []), ...(window.REALQ_N2_EXT || [])].f
 function playBarHtml(word, rom) {
   return `<div class="center mt" style="display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap">
       <button class="pixel-btn small ghost" onclick="speak('${word.r}')">🔊 日语读音</button>
-      <button class="pixel-btn small purple" id="auLoop">🔁 反复播音 ×5（罗马音+中文）</button>
+      <button class="pixel-btn small purple" id="auLoop">🔁 日语连读 ×5</button>
       <span class="dim" style="font-size:12px">罗马音：${rom}</span>
     </div>`;
 }
@@ -314,7 +314,8 @@ function repeatPlay5(word, btn, rom) {
   // 事件驱动逐条续播：第1条在点击手势链内激活语音会话，后续条在 onend 回调里续播
   // （兼容 iOS：多 utterance 一次性入队会被「只播第一条」bug 截断，setTimeout 续播会被手势链拦截）
   const seq = [];
-  for (let i = 0; i < 5; i++) { seq.push([rom, "en-US", .9], [word.m, "zh-CN", .95]); }
+  const jpText = word.w || word.r;                  // 读日语原词（TTS 对汉字词发音正确）
+  for (let i = 0; i < 5; i++) { seq.push([jpText, "ja-JP", .9]); }   // 日语连读5遍
   let idx = 0;
   const step = () => {
     if (!loopActive) return;
@@ -332,7 +333,7 @@ function repeatPlay5(word, btn, rom) {
     const next = () => {
       if (fired) return; fired = true;
       idx++;
-      btn.innerHTML = `🔁 播放中 ${Math.min(5, Math.ceil(idx / 2))}/5 遍 …（点我停止）`;
+      btn.innerHTML = `🔁 播放中 ${Math.min(5, idx)}/5 遍 …（点我停止）`;
       step();
     };
     u.onend = next; u.onerror = next;
@@ -844,7 +845,7 @@ function renderFlip() {
       <span class="hint">🧠 先别急着点 · 在心里努力回想它的意思 → 点卡片揭示（手机点一下 / 电脑按 Space）</span>
       <div class="center mt" style="border-top:2px dashed rgba(255,255,255,.25);padding-top:10px">
         <button class="pixel-btn small ghost" onclick="event.stopPropagation();speak('${v.r}')">🔊 读音</button>
-        <button class="pixel-btn small purple" id="auLoop" onclick="event.stopPropagation();repeatPlay5(flip.words[flip.i], this, '${kanaToRomaji(v.r)}')">🔁 反复播音 ×5</button>
+        <button class="pixel-btn small purple" id="auLoop" onclick="event.stopPropagation();repeatPlay5(flip.words[flip.i], this, '${kanaToRomaji(v.r)}')">🔁 日语连读 ×5</button>
         <span class="dim" style="font-size:11px;display:block;margin-top:6px">罗马音：${kanaToRomaji(v.r)}</span>
       </div>
     </div>
