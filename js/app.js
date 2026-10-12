@@ -51,7 +51,7 @@ function pickV(lang) {
   return voices.find(x => (x.lang || "").toLowerCase().replace("_", "-").startsWith(p)) || null;
 }
 function speak(text, rate, lang) {
-  if (!("speechSynthesis" in window)) { toast("当前浏览器不支持语音合成", "ach"); return; }
+  if (!("speechSynthesis" in window)) { toast("🚫 此浏览器不支持语音合成（vivo等国产浏览器已裁剪）——请用 Chrome 打开本页", "ach"); return; }
   refreshVoices();
   const L = lang || "ja-JP";
   speechSynthesis.cancel();
@@ -72,7 +72,12 @@ function speak(text, rate, lang) {
 }
 let _voiceWarned = false;
 function warnVoice(lang) {
-  if (_voiceWarned || !("speechSynthesis" in window)) return;
+  if (_voiceWarned) return;
+  if (!("speechSynthesis" in window)) {
+    _voiceWarned = true;
+    toast("🚫 此浏览器不支持语音合成（vivo等国产浏览器已裁剪）——请用 Chrome 打开本页", "ach");
+    return;
+  }
   refreshVoices();
   const p = (lang || "ja-JP").slice(0, 2).toLowerCase();
   if (voices.length && !voices.some(x => (x.lang || "").toLowerCase().startsWith(p))) {
