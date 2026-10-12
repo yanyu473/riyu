@@ -33,16 +33,52 @@ function beep(type) {
 
 /* ---------- TTS 日语朗读 ---------- */
 let voices = [];
-function refreshVoices() { voices = speechSynthesis.getVoices(); }
+function refreshVoices() { try { voices = speechSynthesis.getVoices() || []; } catch (e) {} }
 if ("speechSynthesis" in window) { refreshVoices(); speechSynthesis.onvoiceschanged = refreshVoices; }
-function speak(text, rate) {
+let _kae = null;
+function keepAlive() {
+  if (_kae) clearInterval(_kae);
+  _kae = setInterval(() => {
+    try {
+      if (speechSynthesis.speaking || speechSynthesis.pending) { if (speechSynthesis.paused) speechSynthesis.resume(); }
+      else { clearInterval(_kae); _kae = null; }
+    } catch (e) { clearInterval(_kae); _kae = null; }
+  }, 4000);
+}
+function pickV(lang) {
+  if (!voices.length) refreshVoices();
+  const p = lang.slice(0, 2).toLowerCase();
+  return voices.find(x => (x.lang || "").toLowerCase().replace("_", "-").startsWith(p)) || null;
+}
+function speak(text, rate, lang) {
   if (!("speechSynthesis" in window)) { toast("当前浏览器不支持语音合成", "ach"); return; }
+  refreshVoices();
+  const L = lang || "ja-JP";
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = "ja-JP"; u.rate = rate || .9;
-  const v = voices.find(v => /ja/i.test(v.lang));
+  u.lang = L; u.rate = rate || .9;
+  const v = pickV(L);
   if (v) u.voice = v;
+  u.onend = () => { if (_kae) { clearInterval(_kae); _kae = null; } };
+  u.onerror = e => {
+    if (_kae) { clearInterval(_kae); _kae = null; }
+    const err = e && e.error;
+    if (err && err !== "interrupted" && err !== "canceled")
+      toast("🔇 播放失败：请点 ▶ 按钮重试，并确认手机媒体音量已打开", "ach");
+  };
   speechSynthesis.speak(u);
+  try { speechSynthesis.resume(); } catch (e) {}
+  keepAlive();
+}
+let _voiceWarned = false;
+function warnVoice(lang) {
+  if (_voiceWarned || !("speechSynthesis" in window)) return;
+  refreshVoices();
+  const p = (lang || "ja-JP").slice(0, 2).toLowerCase();
+  if (voices.length && !voices.some(x => (x.lang || "").toLowerCase().startsWith(p))) {
+    _voiceWarned = true;
+    toast("⚠ 未检测到日语语音包，可能无声：请在系统「设置 → 朗读/文字转语音」中添加日语", "ach");
+  }
 }
 
 /* ---------- 看板娘互动 ---------- */
@@ -86,6 +122,7 @@ document.getElementById("modal").onclick = e => { if (e.target.id === "modal") c
 let session = null;
 
 function startSession(cfg) {
+  warnVoice("ja-JP");
   session = Object.assign({ i: 0, correct: 0, combo: 0, bestCombo: 0, xp: 0, total: cfg.qs.length }, cfg);
   renderQuestion();
 }
@@ -258,30 +295,41 @@ function kanaToRomaji(src) {
 let loopActive = false;
 function repeatPlay5(word, btn, rom) {
   const ORIG = btn.innerHTML;
-  if (loopActive) { loopActive = false; speechSynthesis.cancel(); btn.innerHTML = ORIG; return; }  // 再点停止
+  if (loopActive) {                                  // 再点停止
+    loopActive = false;
+    speechSynthesis.cancel();
+    if (_kae) { clearInterval(_kae); _kae = null; }
+    btn.innerHTML = ORIG;
+    return;
+  }
+  if (!("speechSynthesis" in window)) return;
+  refreshVoices();
+  speechSynthesis.cancel();
   loopActive = true;
-  let n = 0;
-  const playOne = step => {
-    if (!loopActive) return;
-    const items = [{ t: rom, lang: "en-US" }, { t: word.m, lang: "zh-CN" }];
-    if (step >= items.length) {                       // 一遍（罗马音→中文）播完
-      n++;
-      if (n >= 5) { loopActive = false; btn.innerHTML = ORIG; return; }
-      btn.innerHTML = `🔁 播放中 ${n + 1}/5 遍 …（点我停止）`;
-      setTimeout(() => playOne(0), 450);
-      return;
-    }
-    const it = items[step];
-    const u = new SpeechSynthesisUtterance(it.t);
-    u.lang = it.lang; u.rate = 0.9;
-    let fired = false;
-    const next = () => { if (fired) return; fired = true; playOne(step + 1); };
-    u.onend = next; u.onerror = next;
-    if (step === 0 && n === 0) speechSynthesis.cancel();
-    speechSynthesis.speak(u);
+  let done = 0;
+  const total = 10;                                  // 5遍 × (罗马音 + 中文)
+  const mk = (text, lang, rate) => {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang; u.rate = rate;
+    const v = pickV(lang);
+    if (v) u.voice = v;
+    u.onend = u.onerror = () => {
+      done++;
+      if (loopActive) btn.innerHTML = `🔁 播放中 ${Math.min(5, Math.ceil(done / 2))}/5 遍 …（点我停止）`;
+      if (done >= total) {
+        loopActive = false; btn.innerHTML = ORIG;
+        if (_kae) { clearInterval(_kae); _kae = null; }
+      }
+    };
+    return u;
   };
   btn.innerHTML = `🔁 播放中 1/5 遍 …（点我停止）`;
-  playOne(0);
+  for (let i = 0; i < 5; i++) {                      // 一次点击全部入队——iOS/Android 都能连播
+    speechSynthesis.speak(mk(rom, "en-US", .9));
+    speechSynthesis.speak(mk(word.m, "zh-CN", .95));
+  }
+  try { speechSynthesis.resume(); } catch (e) {}
+  keepAlive();
 }
 
 /* ---------- 单词题目构造 ---------- */
