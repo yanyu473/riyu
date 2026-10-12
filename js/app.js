@@ -306,29 +306,36 @@ function repeatPlay5(word, btn, rom) {
   refreshVoices();
   speechSynthesis.cancel();
   loopActive = true;
-  let done = 0;
-  const total = 10;                                  // 5遍 × (罗马音 + 中文)
-  const mk = (text, lang, rate) => {
+  // 事件驱动逐条续播：第1条在点击手势链内激活语音会话，后续条在 onend 回调里续播
+  // （兼容 iOS：多 utterance 一次性入队会被「只播第一条」bug 截断，setTimeout 续播会被手势链拦截）
+  const seq = [];
+  for (let i = 0; i < 5; i++) { seq.push([rom, "en-US", .9], [word.m, "zh-CN", .95]); }
+  let idx = 0;
+  const step = () => {
+    if (!loopActive) return;
+    if (idx >= seq.length) {
+      loopActive = false; btn.innerHTML = ORIG;
+      if (_kae) { clearInterval(_kae); _kae = null; }
+      return;
+    }
+    const [text, lang, rate] = seq[idx];
     const u = new SpeechSynthesisUtterance(text);
     u.lang = lang; u.rate = rate;
     const v = pickV(lang);
     if (v) u.voice = v;
-    u.onend = u.onerror = () => {
-      done++;
-      if (loopActive) btn.innerHTML = `🔁 播放中 ${Math.min(5, Math.ceil(done / 2))}/5 遍 …（点我停止）`;
-      if (done >= total) {
-        loopActive = false; btn.innerHTML = ORIG;
-        if (_kae) { clearInterval(_kae); _kae = null; }
-      }
+    let fired = false;
+    const next = () => {
+      if (fired) return; fired = true;
+      idx++;
+      btn.innerHTML = `🔁 播放中 ${Math.min(5, Math.ceil(idx / 2))}/5 遍 …（点我停止）`;
+      step();
     };
-    return u;
+    u.onend = next; u.onerror = next;
+    speechSynthesis.speak(u);
+    try { speechSynthesis.resume(); } catch (e) {}   // iOS：防止 speak 后立即 paused
   };
   btn.innerHTML = `🔁 播放中 1/5 遍 …（点我停止）`;
-  for (let i = 0; i < 5; i++) {                      // 一次点击全部入队——iOS/Android 都能连播
-    speechSynthesis.speak(mk(rom, "en-US", .9));
-    speechSynthesis.speak(mk(word.m, "zh-CN", .95));
-  }
-  try { speechSynthesis.resume(); } catch (e) {}
+  step();
   keepAlive();
 }
 
