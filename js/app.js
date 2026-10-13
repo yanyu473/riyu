@@ -186,6 +186,8 @@ function answer(ok, explainHtml) {
     if (m) Store.addWrong({ mod: m.mod, q: m.q, opts: m.opts, ans: m.ans, pass: m.pass || "",
       exp: (explainHtml || "").replace(/<[^>]+>/g, " ").trim().slice(0, 200) });
   }
+  const mk = s.qs[s.i] && s.qs[s.i].meta;
+  if (mk && mk.srsW) Store.srsGrade(mk.srsW, ok ? speedGrade(2) : 0);   // 词汇进记忆系统：答对=良好(间隔扩张)，答错=5分钟回炉
   const line = ok
     ? (s.combo >= 3 ? pick(window.MASCOT.praiseCombo(s.combo)) : pick(window.MASCOT.praise))
     : pick(window.MASCOT.comfort);
@@ -253,6 +255,37 @@ function restartSession() { session && session.build ? session.build() : null; }
 /* ---------- 真题构造器（往年真题 + 详细解析） ---------- */
 function realQ(it) {
   const isListen = it.type === "listen" && it.t;
+  // 学习钩子：真题答案驱动记忆系统——词汇题→SRS(该词进遗忘曲线)；语法题→弱句型画像(gramMark)
+  let srsW = "", pat = "";
+  if (it.type === "vocab") {
+    const V = window.VOCAB_N2 || [];
+    const ansTxt = (it.opts || [])[it.ans] || "";
+    const br = (it.q || "").match(/[（(]([^）)]+)[）)]/);
+    const t1 = br ? br[1] : "";
+    let w = (ansTxt && V.find(v => v.r === ansTxt || v.m === ansTxt || v.w === ansTxt))
+      || (t1 && (V.find(v => v.w === t1) || V.find(v => v.r === t1)));
+    if (!w) {
+      // 活用形/读音切片反查辞书形——**只在解析①段的「」引号内找候选**（引号里是考点原词），
+      // 并按与正解选项的字符重合度排序，避免挂到解析里出现的无关词
+      const seg1 = (it.exp || "").split("②")[0];
+      const quotes = (seg1.match(/「([^」]+)」/g) || []).map(x => x.slice(1, -1));
+      const score = v => { const s = new Set([...String(ansTxt), ...String(t1)]); return [...v.w].filter(c => s.has(c)).length; };
+      const cands = V.filter(v => v.w && v.w.length >= 2 && quotes.some(q => q.includes(v.w)));
+      if (cands.length) { cands.sort((a, b) => score(b) - score(a) || b.w.length - a.w.length); w = cands[0]; }
+      if (!w) {                                                                          // 首字活用：「迷った」→「迷う」
+        const ts = [ansTxt, t1].concat(quotes).filter(Boolean);
+        w = V.find(v => v.w && v.w.length >= 2 && ts.some(t => t.length > v.w.length && t.startsWith(v.w[0])));
+      }
+    }
+    if (w) srsW = w.w;
+  } else if (it.type === "gram") {
+    const gs = window.GRAMMAR_N2 || [];
+    const txt = (it.q || "") + (it.exp || "");       // 全文匹配：考点/排除段常含句型原文
+    const cand = gs.map(g => ({ g, bare: g.p.replace(/[～〜（）()]/g, "") }))
+      .filter(x => x.bare.length >= 2 && txt.includes(x.bare))
+      .sort((a, b) => b.bare.length - a.bare.length);   // 取最长=最具体的句型（如「ようにする」优于「ように」）
+    if (cand.length) pat = cand[0].g.p;
+  }
   const mod = { vocab: "单词·真题", gram: "语法·真题", read: "阅读·真题", listen: "听力·真题" }[it.type] || "真题";
   const stem = `<div class="q-panel">
     ${it.passage ? `<div class="passage">${it.passage}</div>` : ""}
@@ -261,7 +294,7 @@ function realQ(it) {
     ${it.type === "listen" && !it.t ? `<p class="dim center mb" style="font-size:12px">⚠ 该题暂无音频，以听力原文形式呈现（降级模式）</p>` : ""}
     <p class="dim center mb" style="color:var(--pink)">❓ ${it.q} <span class="badge gold">${it.src || "往年真题"}</span></p>`;
   return {
-    meta: { mod, q: it.q, opts: it.opts, ans: it.opts[it.ans], pass: it.passage || "" },
+    meta: { mod, q: it.q, opts: it.opts, ans: it.opts[it.ans], pass: it.passage || "", srsW, pat },
     html: stem + it.opts.map((o, i) => `<button class="opt" data-i="${i}">${o}</button>`).join("") + `</div>`,
     mount() {
       if (isListen) {
@@ -423,7 +456,7 @@ function vocabQuestion(word) {
     : `和语词：没有汉字提示，靠假名「${word.r}」的发音画面感硬记，大声朗读加深印象`;
   exp += `<br><b>词性</b>：${word.t || "—"} · <b>助记</b>：${tip}<br><b>自查</b>：遮住答案先说出意思，说得出才算会（主动回想 &gt; 反复重看）`;
   const meta = { mod: "单词", q: mode === "w" ? word.m : `${word.w}（${word.r}）`,
-    opts: opts.map(x => x.t), ans: opts[ans].t };
+    opts: opts.map(x => x.t), ans: opts[ans].t, srsW: word.w };
   return {
     html: stem + `<div class="center mb"><span class="badge">自编题</span></div>` + opts.map((o, i) => `<button class="opt" data-i="${i}">${o.t}</button>`).join(""),
     meta,
@@ -435,10 +468,7 @@ function vocabQuestion(word) {
           x.disabled = true;
           if (opts[j].ok) x.classList.add("correct"); else if (j === i) x.classList.add("wrong");
         });
-        const w = word;
-        if (i === ans) Store.srsGrade(w.w, speedGrade(2));            // 答对=良好 → SM-2 间隔扩张
-        else Store.srsGrade(w.w, 0);                      // 答错=重来 → 5分钟后回炉
-        answer(i === ans, exp);
+        answer(i === ans, exp);                         // SRS 调度统一在 answer() 内按 meta.srsW 执行
       });
     }
   };
@@ -451,13 +481,13 @@ function buildVocabSession(unitNo) {
   if (unitNo) pool = unitWords(unitNo);
   const weak = pool.filter(w => (Store.state.words[w.w] || 0) < 2);
   const qs = [];
-  const realN = unitNo ? 0 : Math.min(10, REAL("vocab").length);   // 真题优先直到用尽（不足才回退自编）
+  const realN = unitNo ? 0 : Math.min(6, REAL("vocab").length);   // 真自混合：6真题+4自编（自编侧弱词优先）
   if (realN) {
     const rv = freshShuffle(REAL("vocab"), it => it.q, "word").slice(0, realN);
     rv.forEach(it => qs.push(realQ(it)));
     saveRecent("word", rv.map(it => it.q));
   }
-  const n = Math.min(10 - realN, pool.length);
+  const n = Math.min(10 - realN, pool.length);   // 自编部分补足到10题
   const chosen = shuffle(weak).slice(0, n);
   while (chosen.length < n) { const w = pick(pool); if (!chosen.includes(w)) chosen.push(w); }
   chosen.forEach(w => { const q = vocabQuestion(w); if (q) qs.push(q); });
@@ -544,9 +574,12 @@ function buildGramSession(unitNo) {
     const u = window.UNITS_N2.find(x => x.no === unitNo);
     if (u && u.grammar.length) pool = u.grammar.map(i => gs[i]).filter(Boolean);
   }
-  const realN = unitNo ? 0 : Math.min(8, REAL("gram").length);    // 真题优先直到用尽
+  const realN = unitNo ? 0 : Math.min(5, REAL("gram").length);    // 真自混合：5真题+3自编（自编侧短板优先）
   const rg = freshShuffle(REAL("gram"), it => it.q, "gram").slice(0, realN);
-  const selfG = freshShuffle(pool, g => g.p, "gram").slice(0, Math.min(8 - realN, pool.length));
+  // 短板优先：没记住的句型(gramKnown=false)排前、记住的垫底，再各自按防重复轮换 —— 落实「没记住的句型优先重现」
+  const weakP = pool.filter(g => !Store.gramKnown(g.p)), knownP = pool.filter(g => Store.gramKnown(g.p));
+  const selfOrder = [...freshShuffle(weakP, g => g.p, "gram"), ...freshShuffle(knownP, g => g.p, "gram")];
+  const selfG = selfOrder.slice(0, Math.min(8 - realN, pool.length));
   saveRecent("gram", [...rg.map(it => it.q), ...selfG.map(g => g.p)]);
   const qs = [...rg.map(realQ), ...selfG.map(g => gramQuestion(g)).filter(Boolean)];
   startSession({ qs, kind: "gram", title: "语法练习", build: () => buildGramSession(unitNo) });
@@ -606,7 +639,7 @@ function buildListenSession(unitNo) {
     startSession({ qs, kind: "listen", title: "听力训练", build: () => buildListenSession(unitNo) });
     return;
   }
-  const realN = Math.min(8, REAL("listen").length);                 // 真题优先直到用尽
+  const realN = Math.min(5, REAL("listen").length);                 // 真自混合：5真题+3自编
   const rl = freshShuffle(REAL("listen"), kf, "listen").slice(0, realN);
   const sl = freshShuffle(window.LISTEN_N2, kf, "listen").slice(0, 8 - realN);
   saveRecent("listen", [...rl, ...sl].map(kf));
@@ -718,7 +751,7 @@ function buildKanjiSession() {
     const o = uniqOpts(shuffle([{ t: word.r, ok: 1 }, ...shuffle(list.filter(v => v.w !== word.w)).slice(0, 3).map(v => ({ t: v.r, ok: 0 }))]));
     const ans = o.findIndex(x => x.ok);
     return {
-      meta: { mod: "单词", q: `${word.w} 的读音`, opts: o.map(x => x.t), ans: o[ans].t },
+      meta: { mod: "单词", q: `${word.w} 的读音`, opts: o.map(x => x.t), ans: o[ans].t, srsW: word.w },
       html: `<div class="q-panel"><p class="dim center mb">📖 汉字读音 · 音读训读の訓練 <span class="badge">自编题</span></p>
         <div class="flashcard" onclick="speak('${word.r}')"><span class="word">${word.w}</span>
         <span class="hint">💡 点卡片听正确读音 · 想音读规律（声旁相近读音相近）</span></div>
@@ -727,8 +760,7 @@ function buildKanjiSession() {
         app.querySelectorAll(".opt").forEach(b => b.onclick = () => {
           const i = +b.dataset.i;
           app.querySelectorAll(".opt").forEach((x, j) => { x.disabled = true; if (j === ans) x.classList.add("correct"); else if (j === i) x.classList.add("wrong"); });
-          if (i === ans) Store.srsGrade(word.w, speedGrade(2)); else Store.srsGrade(word.w, 0);
-          const on = /[一-龥]/.test(word.w);
+          const on = /[一-龥]/.test(word.w);          // SRS 调度统一在 answer() 内按 meta.srsW 执行
           answer(i === ans, `<span class="jp">${word.w}</span> → <span class="jp">${word.r}</span> ＝ ${word.m}<br><b>读音提示</b>：${on ? "音读为主——记住声旁规律（如「青」=せい，清/情/精同音）" : ""}反复出声读3遍，把字形和读音绑在一起。`);
         });
       }
