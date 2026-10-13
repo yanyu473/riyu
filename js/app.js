@@ -14,6 +14,17 @@ function toast(msg, cls) {
 function shuffle(a) { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 const pick = a => a[Math.floor(Math.random() * a.length)];
 
+/* ---------- 跨次训练防重复：优先出最近没做过的题（解决「题库单一、每次都一样」） ---------- */
+function recentList(kind) { try { return JSON.parse(localStorage.getItem("px_recent_" + kind)) || []; } catch (e) { return []; } }
+function saveRecent(kind, keys) {
+  const all = [...new Set([...keys, ...recentList(kind)])].slice(0, 150);   // 每类只记最近150条
+  try { localStorage.setItem("px_recent_" + kind, JSON.stringify(all)); } catch (e) {}
+}
+function freshShuffle(arr, keyFn, kind) {          // 没做过的排前面（各自洗牌），做过的垫底兜底
+  const rec = new Set(recentList(kind));
+  return [...shuffle(arr.filter(x => !rec.has(keyFn(x)))), ...shuffle(arr.filter(x => rec.has(keyFn(x))))];
+}
+
 /* ---------- 音效（Web Audio 像素蜂鸣） ---------- */
 let AC = null;
 function beep(type) {
@@ -199,7 +210,7 @@ function nextQ() { session.locked = false; session.i++; renderQuestion(); }
 
 function finishSession() {
   const s = session;
-  const acc = Math.round(s.correct / s.total * 100);
+  const acc = s.total ? Math.round(s.correct / s.total * 100) : 0;   // 全部跳过时 total=0，防 NaN
   let bonus = 0, extra = "";
   if (acc === 100) { bonus = 30; Store.state.stats.perfect++; extra = `<div class="combo-pop">PERFECT +30</div>`; }
   if (s.kind === "speak") { Store.state.stats.speakCount++; Store.state.stats.speakBest = Math.max(Store.state.stats.speakBest, s.bestScore || 0); }
@@ -362,6 +373,19 @@ function repeatPlay5(word, btn, rom) {
   keepAlive();
 }
 
+/* 选项去重：词库存在同义词/同读音孪生条目（如 伯母さん/叔母さん、商店/ショップ），
+   若同时被抽中会出现两个完全相同的选项、点哪个都可能被判错 */
+function uniqOpts(o) {
+  const seen = new Set(o.filter(x => x.ok).map(x => x.t));   // 正解文本先占位
+  const out = [];
+  for (const x of o) {
+    if (x.ok) { out.push(x); continue; }
+    if (seen.has(x.t)) continue;                              // 与正解重复或其他重复的干扰项丢弃
+    seen.add(x.t); out.push(x);
+  }
+  return out;
+}
+
 /* ---------- 单词题目构造 ---------- */
 function vocabQuestion(word) {
   const list = VOCAB(); if (list.length < 4) return null;
@@ -387,6 +411,7 @@ function vocabQuestion(word) {
     const o = shuffle([{ t: word.w, ok: 1 }, ...others().map(v => ({ t: v.w, ok: 0 }))]);
     opts = o; ans = o.findIndex(x => x.ok); exp = `<span class="jp">${word.m}</span> → <span class="jp">${word.w}（${word.r}）</span>`;
   }
+  opts = uniqOpts(opts); ans = opts.findIndex(x => x.ok);            // 去重后重算正确索引
   // 详细解析：答案说明 + 词性 + 分类型助记（无原解析时自制的详细版）
   const hasKanji = /[一-龥]/.test(word.w);
   const isKatakana = /^[ァ-ヶーー]+$/.test(word.w.replace(/[（(].*$/, ""));
@@ -424,7 +449,11 @@ function buildVocabSession(unitNo) {
   const weak = pool.filter(w => (Store.state.words[w.w] || 0) < 2);
   const qs = [];
   const realN = unitNo ? 0 : Math.min(10, REAL("vocab").length);   // 真题优先直到用尽（不足才回退自编）
-  if (realN) shuffle(REAL("vocab")).slice(0, realN).forEach(it => qs.push(realQ(it)));
+  if (realN) {
+    const rv = freshShuffle(REAL("vocab"), it => it.q, "word").slice(0, realN);
+    rv.forEach(it => qs.push(realQ(it)));
+    saveRecent("word", rv.map(it => it.q));
+  }
   const n = Math.min(10 - realN, pool.length);
   const chosen = shuffle(weak).slice(0, n);
   while (chosen.length < n) { const w = pick(pool); if (!chosen.includes(w)) chosen.push(w); }
@@ -446,7 +475,7 @@ function gramQuestion(g) {
   const gs = window.GRAMMAR_N2;
   const mode = pick(["mean", "fill"]);
   if (mode === "mean" || gs.length < 4) {
-    const o = shuffle([{ t: g.m, ok: 1 }, ...shuffle(gs.filter(x => x.p !== g.p)).slice(0, 3).map(x => ({ t: x.m, ok: 0 }))]);
+    const o = uniqOpts(shuffle([{ t: g.m, ok: 1 }, ...shuffle(gs.filter(x => x.p !== g.p)).slice(0, 3).map(x => ({ t: x.m, ok: 0 }))]));
     const ans = o.findIndex(x => x.ok);
     return {
       html: `<div class="q-panel"><p class="dim center mb">句型的含义是？</p>
@@ -471,7 +500,7 @@ function gramQuestion(g) {
   if (sentence.includes(bare)) sentence = sentence.replace(bare, "\u0001");
   else return meanQ(g, gs);
   if (!sentence.includes("\u0001")) return meanQ(g, gs);
-  const o = shuffle([{ t: g.p, ok: 1 }, ...shuffle(gs.filter(x => x.p !== g.p)).slice(0, 3).map(x => ({ t: x.p, ok: 0 }))]);
+  const o = uniqOpts(shuffle([{ t: g.p, ok: 1 }, ...shuffle(gs.filter(x => x.p !== g.p)).slice(0, 3).map(x => ({ t: x.p, ok: 0 }))]));
   const ans = o.findIndex(x => x.ok);
   const shown = sentence.replace("\u0001", `<span class="blank">  </span>`);
   return {
@@ -489,7 +518,7 @@ function gramQuestion(g) {
   };
 }
 function meanQ(g, gs) {
-  const o = shuffle([{ t: g.m, ok: 1 }, ...shuffle(gs.filter(x => x.p !== g.p)).slice(0, 3).map(x => ({ t: x.m, ok: 0 }))]);
+  const o = uniqOpts(shuffle([{ t: g.m, ok: 1 }, ...shuffle(gs.filter(x => x.p !== g.p)).slice(0, 3).map(x => ({ t: x.m, ok: 0 }))]));
   const ans = o.findIndex(x => x.ok);
   return {
     html: `<div class="q-panel"><p class="dim center mb">句型含义</p><p class="sentence"><span class="blank">${g.p}</span></p>
@@ -513,8 +542,10 @@ function buildGramSession(unitNo) {
     if (u && u.grammar.length) pool = u.grammar.map(i => gs[i]).filter(Boolean);
   }
   const realN = unitNo ? 0 : Math.min(8, REAL("gram").length);    // 真题优先直到用尽
-  const realQs = shuffle(REAL("gram")).slice(0, realN).map(realQ);
-  const qs = [...realQs, ...shuffle(pool).slice(0, Math.min(8 - realN, pool.length)).map(g => gramQuestion(g)).filter(Boolean)];
+  const rg = freshShuffle(REAL("gram"), it => it.q, "gram").slice(0, realN);
+  const selfG = freshShuffle(pool, g => g.p, "gram").slice(0, Math.min(8 - realN, pool.length));
+  saveRecent("gram", [...rg.map(it => it.q), ...selfG.map(g => g.p)]);
+  const qs = [...rg.map(realQ), ...selfG.map(g => gramQuestion(g)).filter(Boolean)];
   startSession({ qs, kind: "gram", title: "语法练习", build: () => buildGramSession(unitNo) });
 }
 
@@ -549,6 +580,7 @@ function requireErrTag() {
   const nextBtn = body && body.querySelector('button[onclick="nextQ()"]');
   if (!nextBtn) return;
   const tags = ["词汇不懂", "语速太快", "没反应过来", "走神"];
+  if (!nextBtn.dataset.next) nextBtn.dataset.next = nextBtn.textContent;   // 保留原文案（末题为「查看结果」）
   nextBtn.disabled = true; nextBtn.textContent = "请先标记错因 ↓ 再继续";
   const ex = body.querySelector(".explain");
   ex.insertAdjacentHTML("beforeend",
@@ -562,16 +594,20 @@ function requireErrTag() {
   });
 }
 function buildListenSession(unitNo) {
+  const kf = it => it.q + "|" + (it.t || "").slice(0, 16);
   if (unitNo) {
     const u = window.UNITS_N2.find(x => x.no === unitNo);
-    const pool = shuffle(window.LISTEN_N2).slice(0, u && u.listen ? u.listen : 8);
+    const pool = freshShuffle(window.LISTEN_N2, kf, "listen").slice(0, u && u.listen ? u.listen : 8);
+    saveRecent("listen", pool.map(kf));
     const qs = pool.map(listenQuestion);
     startSession({ qs, kind: "listen", title: "听力训练", build: () => buildListenSession(unitNo) });
     return;
   }
   const realN = Math.min(8, REAL("listen").length);                 // 真题优先直到用尽
-  const qs = [...shuffle(REAL("listen")).slice(0, realN).map(realQ),
-    ...shuffle(window.LISTEN_N2).slice(0, 8 - realN).map(listenQuestion)];
+  const rl = freshShuffle(REAL("listen"), kf, "listen").slice(0, realN);
+  const sl = freshShuffle(window.LISTEN_N2, kf, "listen").slice(0, 8 - realN);
+  saveRecent("listen", [...rl, ...sl].map(kf));
+  const qs = [...rl.map(realQ), ...sl.map(listenQuestion)];
   startSession({ qs, kind: "listen", title: "听力训练", build: () => buildListenSession() });
 }
 
@@ -663,7 +699,9 @@ function buildSpeedSession() {
   let pool = all.filter(x => (x.src || "").includes("即時応答"));
   if (pool.length < 5) pool = all;
   if (!pool.length) return toast("速答题库准备中");
-  const qs = shuffle(pool).slice(0, Math.min(10, pool.length)).map(realQ);
+  const sp = freshShuffle(pool, it => it.q, "listen").slice(0, Math.min(10, pool.length));
+  saveRecent("listen", sp.map(it => it.q));
+  const qs = sp.map(realQ);
   startSession({ qs, kind: "listen", title: "⚡ 即時応答速训",
     build: buildSpeedSession,
     next: `<button class="pixel-btn primary" onclick="location.hash='#/practice'">返回训练</button>` });
@@ -674,7 +712,7 @@ function buildKanjiSession() {
   const list = VOCAB().filter(w => /[一-龥]/.test(w.w) && w.w !== w.r);
   if (list.length < 8) return toast("词汇数据加载中");
   const qs = shuffle(list).slice(0, 10).map(word => {
-    const o = shuffle([{ t: word.r, ok: 1 }, ...shuffle(list.filter(v => v.w !== word.w)).slice(0, 3).map(v => ({ t: v.r, ok: 0 }))]);
+    const o = uniqOpts(shuffle([{ t: word.r, ok: 1 }, ...shuffle(list.filter(v => v.w !== word.w)).slice(0, 3).map(v => ({ t: v.r, ok: 0 }))]));
     const ans = o.findIndex(x => x.ok);
     return {
       meta: { mod: "单词", q: `${word.w} 的读音`, opts: o.map(x => x.t), ans: o[ans].t },
@@ -772,6 +810,7 @@ function arrangeQuestion(item) {
       };
       draw();
       const play = rate => {
+        if (!("speechSynthesis" in window)) { toast("🚫 此浏览器不支持语音合成（vivo等已裁剪）——请用 Chrome 打开本页", "ach"); return; }
         const u = new SpeechSynthesisUtterance(item.s);
         u.lang = "ja-JP"; u.rate = rate || 0.95;
         speechSynthesis.cancel(); speechSynthesis.speak(u);
@@ -785,8 +824,8 @@ function arrangeQuestion(item) {
         p2.classList.remove("hidden");
         p2.querySelectorAll(".apMean").forEach(b => b.disabled = true);   // 听完才可选
         // 播放完句子后，才启动 5 秒选意（started 防 onend/onerror 双触发导致双倍速计时）
-        const u = new SpeechSynthesisUtterance(item.s);
-        u.lang = "ja-JP"; u.rate = 0.95;
+        let u = null;
+        try { if ("speechSynthesis" in window) { u = new SpeechSynthesisUtterance(item.s); u.lang = "ja-JP"; u.rate = 0.95; } } catch (e) {}   // 无语音合成不抛异常
         let started = false;
         const start5 = () => {
           if (started || !p2.isConnected || timerDone) return;
@@ -802,9 +841,8 @@ function arrangeQuestion(item) {
             if (left <= 0) { clearInterval(timerIv); judge(-1); }         // 超时判错
           }, 1000);
         };
-        speechSynthesis.cancel(); speechSynthesis.speak(u);
-        u.onend = start5; u.onerror = start5;
-        setTimeout(start5, 6000);                              // 兜底：语音事件丢失时最多等6秒
+        try { if (u) { speechSynthesis.cancel(); speechSynthesis.speak(u); u.onend = start5; u.onerror = start5; } } catch (e) {}
+        setTimeout(start5, 6000);                              // 兜底：语音事件丢失/无语音合成时最多等6秒
       };
       let timerDone = false;
       const judge = idx => {
@@ -831,7 +869,9 @@ function arrangeQuestion(item) {
 function buildArrangeSession() {
   const list = window.ARRANGE_N2 || [];
   if (list.length < 6) return toast("组句题库加载中…");
-  const qs = shuffle(list).slice(0, 6).map(arrangeQuestion);
+  const arr = freshShuffle(list, x => x.s, "arrange");
+  saveRecent("arrange", arr.slice(0, 6).map(x => x.s));
+  const qs = arr.slice(0, 6).map(arrangeQuestion);
   startSession({ qs, kind: "listen", title: "🧩 听力组句",
     build: buildArrangeSession,
     next: `<button class="pixel-btn primary" onclick="location.hash='#/practice'">返回训练</button>` });
