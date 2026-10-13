@@ -270,8 +270,10 @@ function realQ(it) {
       }
       if (it.type === "vocab") {                    // 真题词题：匹配本地词库 → 挂反复播音条
         const V = window.VOCAB_N2 || [];
-        const w = V.find(v => (it.opts || []).some(o => o === v.m))
-          || V.find(v => it.q && (it.q.includes("(" + v.r + ")") || it.q.includes("（" + v.r + "）") || it.q.includes(v.w)));
+        const ansTxt = (it.opts || [])[it.ans] || "";
+        const w = (ansTxt && V.find(v => v.r === ansTxt || v.m === ansTxt || v.w === ansTxt))   // 优先精确匹配正解（读音/词义/词形）
+          || V.find(v => it.q && (it.q.includes("（" + v.w + "）") || it.q.includes("(" + v.w + ")")))   // 题干括号里的目标词
+          || V.find(v => it.q && (it.q.includes("(" + v.r + ")") || it.q.includes("（" + v.r + "）")));   // 括号里是读音（不再做子串宽泛匹配，避免挂到无关词）
         attachPlayBar(w || null);
         if (!w) {
           const anchor = app.querySelector(".q-panel .passage") || app.querySelector(".q-panel p");
@@ -1170,7 +1172,7 @@ function tickCountdown() {
   const d = document.getElementById("cdD"); if (!d) return;
   const e = new Date((Store.state.examDate || "2026-12-06") + "T00:00:00");
   const diff = Math.max(0, e - new Date());
-  document.getElementById("cdD").textContent = Math.ceil(diff / 864e5);
+  document.getElementById("cdD").textContent = Store.daysLeft();   // 与阶段判定同口径（原先 Math.ceil 会多显示1天）
   document.getElementById("cdH").textContent = String(Math.floor(diff / 36e5) % 24).padStart(2, "0");
   document.getElementById("cdM").textContent = String(Math.floor(diff / 6e4) % 60).padStart(2, "0");
 }
@@ -1291,14 +1293,18 @@ function practiceHub() {
 }
 
 /* 智能预测：按模考趋势线性外推考试日得分（启发式，非官方口径） */
+function mockEst180(x) {                     // 局部模考单部分上限60/120 → 折算到180总分口径，避免拉低预测
+  const parts = Math.max(1, String(x.part || "言語知識").split("＋").length);
+  return Math.round((x.est || 0) / parts * 3);
+}
 function examPredict() {
   const h = (Store.state.mockHistory || []).filter(x => typeof x.est === "number");
   const days = Math.max(0, Store.daysLeft());
   if (h.length < 2) return { ready: false, days };
   const last = h[h.length - 1], prev = h[h.length - 2];
   const dDays = Math.max(1, Math.round((new Date(last.d) - new Date(prev.d)) / 864e5));
-  const slope = (last.est - prev.est) / dDays;
-  const pred = Math.round(Math.min(180, Math.max(0, last.est + slope * days)));
+  const slope = (mockEst180(last) - mockEst180(prev)) / dDays;
+  const pred = Math.round(Math.min(180, Math.max(0, mockEst180(last) + slope * days)));
   const trend = slope > 0.4 ? "📈 上升" : slope < -0.4 ? "📉 下滑" : "➡️ 平稳";
   return { ready: true, days, pred, slope: Math.round(slope * 10) / 10, trend, pass: pred >= 90, n: h.length };
 }
@@ -1355,8 +1361,8 @@ function progressPage() {
     <div class="pixel-panel mb">
       <div class="sec-title">📈 模考估分趋势 · 近 ${st.mockHistory.length} 次（180分制·非官方口径）</div>
       <div class="chart" style="height:150px">
-        ${st.mockHistory.map(x => `<div class="col"><em>${x.est}</em>
-          <i class="${x.est >= 90 ? "gold" : ""}" style="height:${Math.max(4, Math.round(x.est / 180 * 100))}%"></i>
+        ${st.mockHistory.map(x => `<div class="col"><em>${mockEst180(x)}</em>
+          <i class="${mockEst180(x) >= 90 ? "gold" : ""}" style="height:${Math.max(4, Math.round(mockEst180(x) / 180 * 100))}%"></i>
           <b>${x.d.slice(5)}</b></div>`).join("")}
       </div>
       <p class="dim mt" style="font-size:12px">金色 = 估算达线（90分）· 最佳 ${st.stats.bestMock || "—"} · 看趋势比看单次更重要，策略有效与否一目了然</p>
