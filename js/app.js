@@ -187,7 +187,8 @@ function answer(ok, explainHtml) {
       exp: (explainHtml || "").replace(/<[^>]+>/g, " ").trim().slice(0, 200) });
   }
   const mk = s.qs[s.i] && s.qs[s.i].meta;
-  if (mk && mk.srsW) Store.srsGrade(mk.srsW, ok ? speedGrade(2) : 0);   // 词汇进记忆系统：答对=良好(间隔扩张)，答错=5分钟回炉
+  if (mk && mk.srsW) Store.srsGrade(mk.srsW, ok ? speedGrade(2) : 0);          // 词汇进记忆系统：答对=间隔扩张，答错=5分钟回炉
+  else if (mk && mk.pat) Store.srsGrade("g:" + mk.pat, ok ? speedGrade(2) : 0); // 语法句型进独立遗忘曲线（g: 命名空间）
   const line = ok
     ? (s.combo >= 3 ? pick(window.MASCOT.praiseCombo(s.combo)) : pick(window.MASCOT.praise))
     : pick(window.MASCOT.comfort);
@@ -477,20 +478,36 @@ function vocabQuestion(word) {
 function buildVocabSession(unitNo) {
   const list = VOCAB();
   if (list.length < 8) return toast("词汇数据加载中，请稍候…");
-  let pool = list;
-  if (unitNo) pool = unitWords(unitNo);
-  const weak = pool.filter(w => (Store.state.words[w.w] || 0) < 2);
-  const qs = [];
-  const realN = unitNo ? 0 : Math.min(6, REAL("vocab").length);   // 真自混合：6真题+4自编（自编侧弱词优先）
-  if (realN) {
-    const rv = freshShuffle(REAL("vocab"), it => it.q, "word").slice(0, realN);
-    rv.forEach(it => qs.push(realQ(it)));
-    saveRecent("word", rv.map(it => it.q));
+  const pool = unitNo ? unitWords(unitNo) : list;
+  const cap = 10, qs = [];
+  const inQs = q => qs.some(x => x.meta && x.meta.q === q.meta.q);
+
+  // ① 遗忘曲线优先：SRS 到期该复习的词先上（该反复就反复），最多占 7 题，留 3 题给新内容
+  const dueWords = Store.srsDue(40).filter(w => pool.some(v => v.w === w)).slice(0, cap - 3);   // 先过滤到本词库再限量，保证到期词不被截掉
+  const dueSet = new Set(dueWords);
+  dueWords.forEach(w => {
+    const rq = unitNo ? null : REAL("vocab").find(it => {          // 到期词若有对应真题 → 优先用真题
+      const a = (it.opts || [])[it.ans] || "";
+      return a === w || (it.q || "").includes(w) || (it.exp || "").includes("「" + w + "」");
+    });
+    if (rq) { const q = realQ(rq); if (!inQs(q)) { qs.push(q); return; } }
+    const v = pool.find(x => x.w === w);
+    if (v) { const q = vocabQuestion(v); if (q && !inQs(q)) qs.push(q); }
+  });
+
+  // ② 真题补充（未做过的优先 → 不会每天重复）
+  const realN = unitNo ? 0 : Math.min(cap - qs.length, 6);
+  if (realN > 0) {
+    const rv = freshShuffle(REAL("vocab"), it => it.q, "word").slice(0, realN).map(realQ);
+    rv.forEach(q => { if (!inQs(q)) qs.push(q); });
+    saveRecent("word", rv.map(q => q.meta.q));
   }
-  const n = Math.min(10 - realN, pool.length);   // 自编部分补足到10题
-  const chosen = shuffle(weak).slice(0, n);
-  while (chosen.length < n) { const w = pick(pool); if (!chosen.includes(w)) chosen.push(w); }
-  chosen.forEach(w => { const q = vocabQuestion(w); if (q) qs.push(q); });
+
+  // ③ 自编新题填充：未掌握词（弱项）优先，排除到期集合
+  const weak = shuffle(pool.filter(w => (Store.state.words[w.w] || 0) < 2 && !dueSet.has(w.w)));
+  for (const w of weak) { if (qs.length >= cap) break; const q = vocabQuestion(w); if (q && !inQs(q)) qs.push(q); }
+  let guard = 0;
+  while (qs.length < cap && guard++ < 300) { const q = vocabQuestion(pick(pool)); if (q && !inQs(q)) qs.push(q); }
   startSession({ qs, kind: "word", title: "单词记忆", build: () => buildVocabSession(unitNo) });
 }
 
@@ -574,14 +591,26 @@ function buildGramSession(unitNo) {
     const u = window.UNITS_N2.find(x => x.no === unitNo);
     if (u && u.grammar.length) pool = u.grammar.map(i => gs[i]).filter(Boolean);
   }
-  const realN = unitNo ? 0 : Math.min(5, REAL("gram").length);    // 真自混合：5真题+3自编（自编侧短板优先）
-  const rg = freshShuffle(REAL("gram"), it => it.q, "gram").slice(0, realN);
-  // 短板优先：没记住的句型(gramKnown=false)排前、记住的垫底，再各自按防重复轮换 —— 落实「没记住的句型优先重现」
-  const weakP = pool.filter(g => !Store.gramKnown(g.p)), knownP = pool.filter(g => Store.gramKnown(g.p));
-  const selfOrder = [...freshShuffle(weakP, g => g.p, "gram"), ...freshShuffle(knownP, g => g.p, "gram")];
-  const selfG = selfOrder.slice(0, Math.min(8 - realN, pool.length));
-  saveRecent("gram", [...rg.map(it => it.q), ...selfG.map(g => g.p)]);
-  const qs = [...rg.map(realQ), ...selfG.map(g => gramQuestion(g)).filter(Boolean)];
+  const cap = 8, qs = [];
+  const inQt = t => qs.some(q => q.meta && q.meta.q === t);
+  const inQp = p => qs.some(q => q.meta && q.meta.pat === p);
+
+  // ① 遗忘曲线优先：SRS 到期句型（语法独立命名空间 g:）最多占 5 题
+  const dueP = Store.srsDue(40, "g:").map(k => k.slice(2)).filter(p => pool.some(g => g.p === p)).slice(0, cap - 3);   // srsDue 返回带 g: 前缀的 key，须去前缀
+  const dueSet = new Set(dueP);
+  dueP.forEach(p => { const g = gs.find(x => x.p === p); if (g && !inQp(p)) { const q = gramQuestion(g); if (q) qs.push(q); } });
+
+  // ② 真题补充（未做过的优先）
+  const realN = unitNo ? 0 : Math.min(cap - qs.length, 5);
+  freshShuffle(REAL("gram"), it => it.q, "gram").slice(0, realN).map(realQ)
+    .forEach(q => { if (!inQt(q.meta.q)) qs.push(q); });
+
+  // ③ 自编填充：未掌握句型优先（短板）→ 已掌握垫底，排除到期集合
+  const weakP = pool.filter(g => !Store.gramKnown(g.p) && !dueSet.has(g.p));
+  const knownP = pool.filter(g => Store.gramKnown(g.p) && !dueSet.has(g.p));
+  const order = [...freshShuffle(weakP, g => g.p, "gram"), ...freshShuffle(knownP, g => g.p, "gram")];
+  for (const g of order) { if (qs.length >= cap) break; if (inQp(g.p)) continue; const q = gramQuestion(g); if (q) qs.push(q); }
+  saveRecent("gram", qs.filter(q => q.meta && q.meta.pat).map(q => q.meta.pat));
   startSession({ qs, kind: "gram", title: "语法练习", build: () => buildGramSession(unitNo) });
 }
 
