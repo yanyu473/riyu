@@ -117,7 +117,9 @@ const Store = (() => {
   function addWrong(item) {
     const key = item.mod + "|" + item.q;
     const old = cur.wrongs.find(w => w.mod + "|" + w.q === key);
-    if (old) { old.n++; old.date = today(); old.due = dayOffset(1); old.lv = 0; }
+    if (old) { old.n++; old.date = today(); old.due = dayOffset(1); old.lv = 0;
+      if (item.pass && !old.pass) old.pass = item.pass;          // 老记录缺阅读材料/解析时补上
+      if (item.exp && !old.exp) old.exp = item.exp; }
     else cur.wrongs.unshift(Object.assign({ date: today(), n: 1, lv: 0, due: dayOffset(1) }, item));
     cur.wrongs = cur.wrongs.slice(0, 300);
     save();
