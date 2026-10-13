@@ -424,10 +424,19 @@ function uniqOpts(o) {
 }
 
 /* ---------- 单词题目构造 ---------- */
+/* 自适应题型难度：正确率低→偏基础「假名认义」；正确率高→加入更难题型（拼写/读音/汉字）
+   k=假名→词义 m=汉字→释义 r=汉字→读音 w=释义→单词 */
+function vocabMode() {
+  const s = Store.state.stats;
+  if (!s.vocabTotal || s.vocabTotal < 20) return pick(["k", "k", "m", "r", "w"]);   // 样本不足→常规分布
+  const acc = s.vocabCorrect / s.vocabTotal;
+  if (acc < 0.6) return pick(["k", "k", "k", "m"]);                 // 基础巩固期：多练短板题型
+  if (acc >= 0.85) return pick(["m", "m", "r", "w", "k"]);          // 进阶挑战期：加难度
+  return pick(["k", "k", "m", "r", "w"]);
+}
 function vocabQuestion(word) {
   const list = VOCAB(); if (list.length < 4) return null;
-  // k：假名→词义（主练短板：见假名识义，不显示汉字）
-  const mode = pick(["k", "k", "m", "r", "w"]);
+  const mode = vocabMode();   // 自适应：按你的近期正确率动态调整
   const others = () => shuffle(list.filter(v => v.w !== word.w)).slice(0, 3);
   let stem, opts, ans, exp;
   if (mode === "k") {
@@ -1170,8 +1179,15 @@ function homePage() {
 
     ${(() => { const ins = Store.insight(); return `
     <div class="pixel-panel mb" style="border-color:var(--violet)">
-      <div class="sec-title">🧠 今日智能建议 · 实时分析你的数据</div>
-      <div style="display:flex;flex-direction:column;gap:10px">
+      <div class="sec-title">🧠 智能教练 · 实时分析你的数据</div>
+      <p style="font-size:14px;line-height:1.65;background:rgba(10,8,24,.45);border-left:4px solid var(--violet);padding:9px 12px;border-radius:8px">💬 ${ins.diagnose}</p>
+      <div class="stat-row mt">
+        <div class="stat"><span class="num">${ins.goal.newToday}/${ins.goal.newLimit}</span><span class="lab">今日新词</span>
+          <div class="bar blue mt" style="height:10px"><i style="width:${Math.min(100, Math.round(ins.goal.newToday / Math.max(1, ins.goal.newLimit) * 100))}%"></i></div></div>
+        <div class="stat"><span class="num">${ins.goal.dueLeft}</span><span class="lab">待复习（到期）</span></div>
+        <div class="stat"><span class="num">${ins.riskW.length}</span><span class="lab">高风险词 ⚠</span></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
         ${ins.tips.map(t => `<div style="display:flex;align-items:center;gap:10px;background:rgba(10,8,24,.4);border:2px solid var(--line);border-radius:10px;padding:10px 12px">
           <span style="font-size:20px">${t.ico}</span>
           <span style="flex:1;font-size:14px;line-height:1.55">${t.txt}</span>
