@@ -266,7 +266,7 @@ function realQ(it) {
       if (isListen) {
         document.getElementById("rp1").onclick = () => speak(it.t, .95);
         document.getElementById("rp2").onclick = () => speak(it.t, .65);
-        setTimeout(() => speak(it.t, .95), 400);
+        setTimeout(() => { if (document.getElementById("rp1")) speak(it.t, .95); }, 400);   // 已切走则不响
       }
       if (it.type === "vocab") {                    // 真题词题：匹配本地词库 → 挂反复播音条
         const V = window.VOCAB_N2 || [];
@@ -565,7 +565,7 @@ function listenQuestion(item) {
     mount() {
       document.getElementById("play1").onclick = () => speak(item.t, .95);
       document.getElementById("play2").onclick = () => speak(item.t, .65);
-      setTimeout(() => speak(item.t, .95), 350);
+      setTimeout(() => { if (document.getElementById("play1")) speak(item.t, .95); }, 350);   // 已切走则不响
       app.querySelectorAll(".opt").forEach(b => b.onclick = () => {
         const i = +b.dataset.i;
         app.querySelectorAll(".opt").forEach((x, j) => { x.disabled = true; if (j === item.a) x.classList.add("correct"); else if (j === i) x.classList.add("wrong"); });
@@ -819,7 +819,7 @@ function arrangeQuestion(item) {
       };
       document.getElementById("apPlay").onclick = () => play(0.95);
       document.getElementById("apSlow").onclick = () => play(0.6);
-      setTimeout(() => play(0.95), 350);                      // 自动播放一遍
+      setTimeout(() => { if (document.getElementById("apPlay")) play(0.95); }, 350);   // 自动播放一遍（已切走则不响）
       doneBtn.onclick = () => {
         phase2 = true;
         document.getElementById("apPool").style.opacity = ".45";
@@ -1189,6 +1189,8 @@ function setNewLimitUI(n) {
 }
 
 function completePath() {
+  if (Store.taskDone("path")) return toast("今天已经打过卡了，明天再来 +20XP", "ach");
+  Store.markTask("path");
   Store.addXp(20); Store.state.stats.pathDone++; Store.log("完成今日个性化路径打卡 +20XP");
   const got = Store.checkAch(); got.forEach(a => toast(`${a.ic} 成就解锁：${a.n}`, "ach"));
   beep("win"); toast("路径打卡成功 +20XP"); renderUserBox(); homePage();
@@ -1399,6 +1401,11 @@ function route() {
   if (!Store.user) { location.hash = "#/login"; return; }
   renderUserBox();
   if (window.cdTimer && !hash.startsWith("#/home")) { clearInterval(window.cdTimer); window.cdTimer = null; }
+  if (mock && !mock.locked && !hash.startsWith("#/mock") && !hash.startsWith("#/wrongbook")) {
+    if (mockTimer) { clearInterval(mockTimer); mockTimer = null; }        // 暂停：离开考场即停表
+    mock.paused = true;
+    toast("⏸ 已暂停未完成的" + (mock.partName || "考试") + "，回「模考」页可继续");
+  }
 
   if (hash.startsWith("#/courses")) return coursesPage();
   if (hash.startsWith("#/unit/")) return unitPage(hash.split("/")[2]);
