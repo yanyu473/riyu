@@ -209,9 +209,10 @@ function buildReadSession(typeId) {
   const pool = window.READ_QS.filter(q => q.t === typeId);
   // 往年真题读解（未细分题型）集中进「短中篇」组
   const allRead = (window.REALQ_N2 || []).concat(window.REALQ_N2_EXT || []).filter(x => x.type === "read");
-  const realRead = typeId === "short" ? freshShuffle(allRead, x => x.q, "read").slice(0, 15) : [];
-  const selfQs = freshShuffle(pool, x => x.q, "read").slice(0, typeId === "short" ? 5 : 10);
-  saveRecent("read", [...realRead.map(x => x.q), ...selfQs.map(x => x.q)]);
+  const rk = x => x.q + "|" + (x.opts || [])[0];   // 同题干多题(最多x4)用首选项区分，避免共享key
+  const realRead = typeId === "short" ? freshShuffle(allRead, rk, "read").slice(0, 15) : [];
+  const selfQs = freshShuffle(pool, rk, "read").slice(0, typeId === "short" ? 5 : 10);
+  saveRecent("read", [...realRead.map(rk), ...selfQs.map(rk)]);
   const qs = [...realRead.map(realQ), ...selfQs.map(readQuestion)];
   if (!qs.length) return toast("该题型题目准备中");
   const name = (window.READ_TYPES.find(t => t.id === typeId) || {}).name || "阅读";
