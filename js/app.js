@@ -1165,6 +1165,18 @@ function homePage() {
       </div>
     </div>
 
+    ${(() => { const ins = Store.insight(); return `
+    <div class="pixel-panel mb" style="border-color:var(--violet)">
+      <div class="sec-title">🧠 今日智能建议 · 实时分析你的数据</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        ${ins.tips.map(t => `<div style="display:flex;align-items:center;gap:10px;background:rgba(10,8,24,.4);border:2px solid var(--line);border-radius:10px;padding:10px 12px">
+          <span style="font-size:20px">${t.ico}</span>
+          <span style="flex:1;font-size:14px;line-height:1.55">${t.txt}</span>
+          <button class="pixel-btn small primary" onclick="location.hash='${t.nav}'">${t.btn}</button>
+        </div>`).join("")}
+      </div>
+    </div>`; })()}
+
     <div class="pixel-panel mb">
       <div class="sec-title">今日计划 · ${DAY_TASKS.filter(t => Store.taskDone(t.id)).length}/${DAY_TASKS.length} 完成</div>
       ${DAY_TASKS.map(t => {
@@ -1400,6 +1412,17 @@ function progressPage() {
       </div>
       <p class="dim mt" style="font-size:12px">间隔节奏：学完 → 5分钟 → 30分钟 → 12小时 → 1天 → 6天 → ×EF(2.5) 逐次拉长，答错自动5分钟回炉</p>
     </div>
+    ${(() => { const ins = Store.insight(); return ins.riskW.length ? `
+    <div class="pixel-panel mb" style="border-color:var(--red)">
+      <div class="sec-title">⚠ 遗忘预警 · 最危险的 ${ins.riskW.length} 个词</div>
+      <p class="dim mb" style="font-size:12px">按「记忆强度 EF + 回炉次数」排序——这些词最可能在考场上想不起来</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${ins.riskW.map(x => `<span class="badge red">${x.w}<span class="dim"> EF${(Number(x.e) || 2.5).toFixed(1)}·忘${x.n || 0}次</span></span>`).join("")}
+      </div>
+      ${ins.riskG.length ? `<p class="dim mt" style="font-size:12px">句型同样告急：${ins.riskG.map(x => x.p).join("、")}</p>` : ""}
+      <div class="center mt"><button class="pixel-btn primary" onclick="location.hash='#/practice/word'">▶ 强化这些词</button>
+      <button class="pixel-btn ghost" onclick="location.hash='#/practice/grammar'">📜 练风险句型</button></div>
+    </div>` : `<div class="pixel-panel mb"><p class="dim center" style="font-size:13px">⚠ 暂无高风险词——继续练习后系统会自动预警</p></div>`; })()}
     ${Object.keys(es).length ? `
     <div class="pixel-panel mb">
       <div class="sec-title">🎧 听力错因分布（补救方向）</div>
