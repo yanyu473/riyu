@@ -262,8 +262,22 @@ const Store = (() => {
     if (!tips.length)
       tips.push({ ico: "🌱", txt: "还没有学习记录——先做一次记忆卡，系统就开始追踪你的遗忘曲线", nav: "#/practice/flip", btn: "开始" });
 
+    // 今日目标 + 一句式教练诊断（全部由真实数据动态生成）
+    const newToday = Object.entries(cur.srs).filter(([k, v]) => !k.startsWith("g:") && (v.nd || "").slice(0, 10) === today()).length;
+    const goal = { newToday, newLimit: cur.newLimit || 8, dueLeft: dueW.length + dueG.length };
+    let diagnose;
+    if (!W.length && !G.length) diagnose = "还没有学习记录——先做一组记忆卡，系统就开始追踪你的遗忘曲线";
+    else if (!goal.dueLeft && newToday >= goal.newLimit) diagnose = "今日任务全部完成 🎉 到期预报已排好，保持这个节奏";
+    else if (goal.dueLeft > 20) diagnose = "到期复习积压 " + goal.dueLeft + " 个——今天优先清空，否则遗忘会加速";
+    else if (riskW.length >= 5) diagnose = "有 " + riskW.length + " 个词反复记不住，试试「出声朗读 + 手写」各 3 遍";
+    else if ((cur.streak || 0) >= 7) diagnose = "已连续学习 " + cur.streak + " 天，习惯已建立，保持住";
+    else if (vA !== null && vA < 60) diagnose = "词汇正确率偏低——先把基础题型做稳，比盲目刷量更有效";
+    else if (goal.dueLeft) diagnose = "有 " + goal.dueLeft + " 个到期内容正处遗忘临界点，现在复习性价比最高";
+    else diagnose = "状态不错，按计划推进即可";
+
     return { dueW: dueW.length, dueG: dueG.length, riskW: riskW.slice(0, 8), riskG: riskG.slice(0, 5),
-      tips: tips.slice(0, 3), acc: { vocab: vA, gram: acc("gram"), listen: acc("listen") }, days: daysLeft() };
+      tips: tips.slice(0, 3), acc: { vocab: vA, gram: acc("gram"), listen: acc("listen") }, days: daysLeft(),
+      goal, diagnose };
   }
 
   /* ---- 模块掌握度（进度追踪 & 推荐依据） ---- */
