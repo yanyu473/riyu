@@ -225,6 +225,44 @@ const Store = (() => {
       due: v.filter(x => x.due <= t).length, total: v.length, forecast: days };
   }
 
+  /* ---- 智能分析引擎：从真实学习数据算出「现在最该做什么」+ 遗忘预警 ---- */
+  function insight() {
+    const t = nowStr();
+    const W = Object.entries(cur.srs).filter(([k]) => !k.startsWith("g:")).map(([w, v]) => Object.assign({ w }, v));
+    const G = Object.entries(cur.srs).filter(([k]) => k.startsWith("g:")).map(([k, v]) => Object.assign({ p: k.slice(2) }, v));
+    const dueW = W.filter(x => x.due <= t), dueG = G.filter(x => x.due <= t);
+    // 风险分：EF 越低越易忘 + 回炉次数越多越不稳 + 停在学习中(l=0)说明还没拿下
+    const riskOf = xs => xs.map(x => Object.assign({}, x, {
+        risk: (2.5 - (Number(x.e) || 2.5)) * 2 + (x.n || 0) * 0.6 + (x.l === 0 ? 1.5 : 0) }))
+      .filter(x => x.e < 2.3 || (x.n || 0) >= 3 || x.l === 0)
+      .sort((a, b) => b.risk - a.risk);
+    const riskW = riskOf(W), riskG = riskOf(G);
+    const s = cur.stats, acc = k => s[k + "Total"] ? Math.round(s[k + "Correct"] / s[k + "Total"] * 100) : null;
+    const es = Object.entries(cur.errStats || {}).sort((a, b) => b[1] - a[1]);
+    const hotWrong = [...(cur.wrongs || [])].sort((a, b) => (b.n || 0) - (a.n || 0));
+    const repWrong = hotWrong.filter(x => (x.n || 0) >= 2).length;
+
+    const tips = [];
+    if (dueW.length + dueG.length)
+      tips.push({ ico: "🧠", txt: `${dueW.length} 个词 + ${dueG.length} 个句型已到期——正处在遗忘临界点，现在复习效率最高`, nav: "#/practice/flip", btn: "开始记忆" });
+    if (riskW.length >= 3)
+      tips.push({ ico: "⚠", txt: `检测到 ${riskW.length} 个「难记词」（反复回炉或 EF 偏低），集中攻一遍收益最大`, nav: "#/practice/word", btn: "强化单词" });
+    if (riskG.length >= 2)
+      tips.push({ ico: "📜", txt: `${riskG.length} 个句型你反复记不牢——它们是语法提分的最近空间`, nav: "#/practice/grammar", btn: "攻克语法" });
+    if (es.length && es[0][1] >= 3)
+      tips.push({ ico: "🎧", txt: `听力错因最集中在「${es[0][0]}」(${es[0][1]} 次)，针对性训练见效最快`, nav: "#/practice/listening", btn: "听力训练" });
+    const vA = acc("vocab");
+    if (vA !== null)
+      tips.push({ ico: "📊", txt: `词汇正确率 ${vA}%${vA < 60 ? "，偏低——优先「假名认义」题型补短板" : vA >= 85 ? "，很稳——可多挑战真题词汇" : "，保持即可"}`, nav: "#/practice/word", btn: "去训练" });
+    if (repWrong)
+      tips.push({ ico: "🔁", txt: `错题本有 ${repWrong} 道反复错的题，重做它们记忆最深`, nav: "#/wrongbook", btn: "重做错题" });
+    if (!tips.length)
+      tips.push({ ico: "🌱", txt: "还没有学习记录——先做一次记忆卡，系统就开始追踪你的遗忘曲线", nav: "#/practice/flip", btn: "开始" });
+
+    return { dueW: dueW.length, dueG: dueG.length, riskW: riskW.slice(0, 8), riskG: riskG.slice(0, 5),
+      tips: tips.slice(0, 3), acc: { vocab: vA, gram: acc("gram"), listen: acc("listen") }, days: daysLeft() };
+  }
+
   /* ---- 模块掌握度（进度追踪 & 推荐依据） ---- */
   function scores() {
     const s = cur.stats;
@@ -272,5 +310,5 @@ const Store = (() => {
     markTask, taskDone, daysLeft, setExamDate,
     addWrong, removeWrong, postponeWrong, redelayWrong, dueWrongs,
     srsDue, srsNew, srsQueue, srsGrade, srsStats,
-    gramMark, gramKnown, recordErr, todayStr: today, setNewLimit };
+    gramMark, gramKnown, recordErr, todayStr: today, setNewLimit, insight };
 })();
