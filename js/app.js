@@ -240,6 +240,7 @@ function finishSession() {
       ${extra}
       <div class="big">${grade}　${acc}分</div>
       <p class="dim">答对 ${s.correct} / ${s.total} · 最高连击 ×${s.bestCombo}</p>
+      ${s.dueN ? `<p class="dim" style="color:var(--ice)">🧠 本场有 ${s.dueN} 题来自遗忘曲线的到期复习——它们正被强化（复习永远优先于新词）</p>` : ""}
       <p class="gain mt">+${totalXp} XP</p>
       ${got.map(a => `<p class="mt"><span class="badge gold">${a.ic} 成就解锁：${a.n}</span></p>`).join("")}
       <div class="center mt" style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
@@ -514,12 +515,14 @@ function buildVocabSession(unitNo) {
     saveRecent("word", rv.map(q => q.meta.q));
   }
 
-  // ③ 自编新题填充：未掌握词（弱项）优先，排除到期集合
-  const weak = shuffle(pool.filter(w => (Store.state.words[w.w] || 0) < 2 && !dueSet.has(w.w)));
+  // ③ 自编新题填充：未掌握词（弱项）优先；排除「本场已出过的词」——
+  //    到期词若已用真题呈现（meta.srsW），不能再被未掌握池抽中出成同词的第二题
+  const usedW = new Set(qs.map(q => q.meta && q.meta.srsW).filter(Boolean));
+  const weak = shuffle(pool.filter(w => (Store.state.words[w.w] || 0) < 2 && !usedW.has(w.w)));
   for (const w of weak) { if (qs.length >= cap) break; const q = vocabQuestion(w); if (q && !inQs(q)) qs.push(q); }
   let guard = 0;
   while (qs.length < cap && guard++ < 300) { const q = vocabQuestion(pick(pool)); if (q && !inQs(q)) qs.push(q); }
-  startSession({ qs, kind: "word", title: "单词记忆", build: () => buildVocabSession(unitNo) });
+  startSession({ qs, kind: "word", title: "单词记忆", build: () => buildVocabSession(unitNo), dueN: dueWords.length });
 }
 
 function unitWords(no) {
