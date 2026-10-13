@@ -182,7 +182,7 @@ function answer(ok, explainHtml) {
   else {
     s.combo = 0; beep("bad");
     const m = s.qs[s.i] && s.qs[s.i].meta;
-    if (m) Store.addWrong({ mod: m.mod, q: m.q, opts: m.opts, ans: m.ans,
+    if (m) Store.addWrong({ mod: m.mod, q: m.q, opts: m.opts, ans: m.ans, pass: m.pass || "",
       exp: (explainHtml || "").replace(/<[^>]+>/g, " ").trim().slice(0, 200) });
   }
   const line = ok
@@ -260,7 +260,7 @@ function realQ(it) {
     ${it.type === "listen" && !it.t ? `<p class="dim center mb" style="font-size:12px">⚠ 该题暂无音频，以听力原文形式呈现（降级模式）</p>` : ""}
     <p class="dim center mb" style="color:var(--pink)">❓ ${it.q} <span class="badge gold">${it.src || "往年真题"}</span></p>`;
   return {
-    meta: { mod, q: it.q, opts: it.opts, ans: it.opts[it.ans] },
+    meta: { mod, q: it.q, opts: it.opts, ans: it.opts[it.ans], pass: it.passage || "" },
     html: stem + it.opts.map((o, i) => `<button class="opt" data-i="${i}">${o}</button>`).join("") + `</div>`,
     mount() {
       if (isListen) {
