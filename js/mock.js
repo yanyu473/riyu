@@ -20,7 +20,7 @@ function mockChoice(stem, opts, ans, explain) {
 }
 function mockVocabQ(word) {
   const list = VOCAB();
-  const o = shuffle([{ t: word.m, ok: 1 }, ...shuffle(list.filter(v => v.w !== word.w)).slice(0, 3).map(v => ({ t: v.m, ok: 0 }))]);
+  const o = uniqOpts(shuffle([{ t: word.m, ok: 1 }, ...shuffle(list.filter(v => v.w !== word.w)).slice(0, 3).map(v => ({ t: v.m, ok: 0 }))]));
   const ans = o.findIndex(x => x.ok);
   return mockChoice(
     `<div class="q-panel"><div class="passage center" style="font-size:40px">${word.w}<br><span style="font-size:20px;color:var(--ice)">（${word.r}）</span></div>
@@ -29,7 +29,7 @@ function mockVocabQ(word) {
 }
 function mockGramQ(g) {
   const gs = window.GRAMMAR_N2;
-  const o = shuffle([{ t: g.m, ok: 1 }, ...shuffle(gs.filter(x => x.p !== g.p)).slice(0, 3).map(x => ({ t: x.m, ok: 0 }))]);
+  const o = uniqOpts(shuffle([{ t: g.m, ok: 1 }, ...shuffle(gs.filter(x => x.p !== g.p)).slice(0, 3).map(x => ({ t: x.m, ok: 0 }))]));
   const ans = o.findIndex(x => x.ok);
   return mockChoice(
     `<div class="q-panel"><p class="dim center mb">文法形式「${g.p}」の意味として正しいものはどれか。<span class="badge">自编题</span></p>
@@ -38,10 +38,13 @@ function mockGramQ(g) {
 }
 function mockReadQ(t) {
   const o = [...t.opts];
-  return mockChoice(
+  const q = mockChoice(
     `<div class="q-panel"><div class="passage">${t.passage}</div>
      <p class="dim center mb" style="color:var(--pink)">❓ ${t.q}　<span class="badge">自编题</span></p></div>`,
     o, t.ans, t.exp);
+  q.pass = t.passage || "";
+  q.qt = t.q;
+  return q;
 }
 function mockListenQ(item) {
   return {
@@ -76,6 +79,8 @@ function mockRealQ(it) {
     <p class="dim center mb" style="color:var(--pink)">❓ ${it.q} <span class="badge gold">${it.src || "往年真题"}</span></p>`;
   const q = mockChoice(stem, it.opts, it.ans, `<b>📌 ${it.src || "往年真题"} · 详解</b><br>${it.exp}`);
   q.listenT = isListen ? it.t : null;
+  q.pass = it.passage || "";
+  q.qt = it.q;
   const oldMount = q.mount;
   q.mount = function () {
     oldMount();
@@ -202,7 +207,7 @@ function finishMock(auto) {
       }
       else if (m.ans[i] !== undefined) {           // 只收录「已答但答错」，未作答不进错题本
         if (m.isRedo) { if (m.qs[i].origKey) Store.redelayWrong(m.qs[i].origKey); }   // 回归又错 → 明天重来
-        else Store.addWrong({ mod: b.name, q: (m.qs[i].meta && m.qs[i].meta.q) || qText(m.qs[i]), opts: m.qs[i].optsText || [], ans: (m.qs[i].optsText || [])[m.qs[i].key] || "", exp: (m.qs[i].exp || "").replace(/<[^>]+>/g, " ").slice(0, 240) });
+        else Store.addWrong({ mod: b.name, q: m.qs[i].qt || (m.qs[i].meta && m.qs[i].meta.q) || qText(m.qs[i]), opts: m.qs[i].optsText || [], ans: (m.qs[i].optsText || [])[m.qs[i].key] || "", pass: m.qs[i].pass || (m.qs[i].meta && m.qs[i].meta.pass) || "", exp: (m.qs[i].exp || "").replace(/<[^>]+>/g, " ").slice(0, 240) });
         details.push({ no: i + 1, q: qText(m.qs[i]),
           you: m.ans[i] === undefined ? "未作答" : ((m.qs[i].optsText || [])[m.ans[i]] || "?"),
           right: (m.qs[i].optsText || [])[m.qs[i].key] || "?",
@@ -268,6 +273,17 @@ function finishMock(auto) {
     </div>`);
   mock = null;
   renderUserBox();
+}
+/* 错题的阅读材料：优先用记录里的 pass；老记录缺失时按「题干+选项」回题库精确找回
+   （多道排序题共用同一题干，仅凭题干会找错文章，因此选项必须完全一致，模糊就不显示） */
+function passFor(x) {
+  if (x.pass) return x.pass;
+  const pool = (window.READ_QS || []).concat(window.REALQ_N2 || [], window.REALQ_N2_EXT || []);
+  const byQ = pool.filter(q => q && q.q === x.q);
+  const exact = byQ.find(q => x.opts && q.opts && q.opts.length === x.opts.length &&
+    q.opts.every((o, i) => o === x.opts[i]));
+  if (exact) return exact.passage || "";
+  return byQ.length === 1 ? (byQ[0].passage || "") : "";
 }
 function qText(q) {
   const d = document.createElement("div"); d.innerHTML = q.html;
@@ -338,6 +354,7 @@ function wrongbookPage() {
             ${x.lv ? `<span class="badge green">连对 ${x.lv} 次</span>` : ""}
             <span class="dim" style="font-size:11px">${x.date}</span>
             <p class="mt" style="font-size:16px">${x.q}</p>
+            ${passFor(x) ? `<details class="dim" style="font-size:13px"><summary style="cursor:pointer">📄 展开阅读材料</summary><div class="passage" style="margin-top:6px">${passFor(x)}</div></details>` : ""}
             ${x.opts && x.opts.length ? `<p class="dim" style="font-size:13px">选项：${x.opts.join(" ／ ")}</p>` : ""}
             <p style="color:var(--gold)">✔ ${x.ans || ""}</p>
             ${x.exp ? `<p class="dim" style="font-size:13px">${x.exp}</p>` : ""}
@@ -365,9 +382,10 @@ function redoList(items, title) {
   const qs = items.map(x => {
     const origKey = x.mod + "|" + x.q;
     if (x.opts && x.opts.length >= 2) {
-      const o = shuffle([{ t: x.ans, ok: 1 }, ...x.opts.filter(t => t !== x.ans).map(t => ({ t, ok: 0 }))]);
+      const o = shuffle([{ t: x.ans, ok: 1 }, ...[...new Set(x.opts.filter(t => t !== x.ans))].map(t => ({ t, ok: 0 }))]);   // 去重防两个相同干扰项
       const ans = o.findIndex(v => v.ok);
       const q = mockChoice(`<div class="q-panel"><p class="dim center mb">错题重做 · ${x.mod}</p>
+        ${passFor(x) ? `<div class="passage">${passFor(x)}</div>` : ""}
         <div class="sentence" style="font-size:22px">${x.q}</div>
         <p class="dim center mt" style="font-size:13px">选项</p>`,
         o.map(v => v.t), ans, x.exp || `正确答案：${x.ans}`);
@@ -375,7 +393,7 @@ function redoList(items, title) {
       return q;
     }
     // 无存储选项但有正确答案（记忆卡/听力错题）→ 借同组其他题的答案自动生成选择题
-    const distract = shuffle(items.filter(o => o !== x && o.ans && o.ans !== x.ans)).slice(0, 3).map(o => o.ans);
+    const distract = shuffle([...new Set(items.filter(o => o !== x && o.ans && o.ans !== x.ans).map(o => o.ans))]).slice(0, 3);   // 借来的答案去重
     if (x.ans && distract.length >= 2) {
       const o = shuffle([{ t: x.ans, ok: 1 }, ...distract.map(t => ({ t, ok: 0 }))]);
       const ans = o.findIndex(v => v.ok);
@@ -389,6 +407,7 @@ function redoList(items, title) {
     return {
       key: 0, exp: x.exp, origKey,
       html: `<div class="q-panel center"><p class="dim mb">错题重做 · 先回忆再揭示</p>
+        ${passFor(x) ? `<div class="passage" style="text-align:left">${passFor(x)}</div>` : ""}
         <div class="sentence" style="font-size:26px">${x.q}</div>
         <button class="pixel-btn primary mt" id="revealBtn">揭示答案</button>
         <div id="rv" class="hidden mt"><p style="font-size:20px;color:var(--gold)">✔ ${x.ans}</p>
