@@ -189,7 +189,7 @@ function doAnalyze() {
 }
 
 function readQuestion(t) {
-  const meta = { mod: "阅读", q: t.q, opts: t.opts, ans: t.opts[t.ans] };
+  const meta = { mod: "阅读", q: t.q, opts: t.opts, ans: t.opts[t.ans], pass: t.passage || "" };
   return {
     meta,
     html: `<div class="q-panel">
