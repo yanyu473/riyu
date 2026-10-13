@@ -424,7 +424,7 @@ function vocabQuestion(word) {
   const meta = { mod: "单词", q: mode === "w" ? word.m : `${word.w}（${word.r}）`,
     opts: opts.map(x => x.t), ans: opts[ans].t };
   return {
-    html: stem + opts.map((o, i) => `<button class="opt" data-i="${i}">${o.t}</button>`).join(""),
+    html: stem + `<div class="center mb"><span class="badge">自编题</span></div>` + opts.map((o, i) => `<button class="opt" data-i="${i}">${o.t}</button>`).join(""),
     meta,
     mount() {
       attachPlayBar(word);                        // 反复播音条（罗马音+中文×5）
@@ -480,7 +480,7 @@ function gramQuestion(g) {
     const o = uniqOpts(shuffle([{ t: g.m, ok: 1 }, ...shuffle(gs.filter(x => x.p !== g.p)).slice(0, 3).map(x => ({ t: x.m, ok: 0 }))]));
     const ans = o.findIndex(x => x.ok);
     return {
-      html: `<div class="q-panel"><p class="dim center mb">句型的含义是？</p>
+      html: `<div class="q-panel"><p class="dim center mb">句型的含义是？ <span class="badge">自编题</span></p>
         <p class="sentence"><span class="blank">${g.p}</span></p>
         ${o.map((x, i) => `<button class="opt" data-i="${i}">${x.t}</button>`).join("")}</div>`,
       meta: { mod: "语法", q: g.p, pat: g.p, opts: o.map(x => x.t), ans: o[ans].t },
@@ -506,7 +506,7 @@ function gramQuestion(g) {
   const ans = o.findIndex(x => x.ok);
   const shown = sentence.replace("\u0001", `<span class="blank">  </span>`);
   return {
-    html: `<div class="q-panel"><p class="dim center mb">选出填入空格的正确句型</p>
+    html: `<div class="q-panel"><p class="dim center mb">选出填入空格的正确句型 <span class="badge">自编题</span></p>
       <p class="sentence">${shown}</p>
       ${o.map((x, i) => `<button class="opt" data-i="${i}">${x.t}</button>`).join("")}</div>`,
     meta: { mod: "语法", q: sentence.replace("\u0001", "＿＿"), pat: g.p, opts: o.map(x => x.t), ans: o[ans].t },
@@ -523,7 +523,7 @@ function meanQ(g, gs) {
   const o = uniqOpts(shuffle([{ t: g.m, ok: 1 }, ...shuffle(gs.filter(x => x.p !== g.p)).slice(0, 3).map(x => ({ t: x.m, ok: 0 }))]));
   const ans = o.findIndex(x => x.ok);
   return {
-    html: `<div class="q-panel"><p class="dim center mb">句型含义</p><p class="sentence"><span class="blank">${g.p}</span></p>
+    html: `<div class="q-panel"><p class="dim center mb">句型含义 <span class="badge">自编题</span></p><p class="sentence"><span class="blank">${g.p}</span></p>
       ${o.map((x, i) => `<button class="opt" data-i="${i}">${x.t}</button>`).join("")}</div>`,
     meta: { mod: "语法", q: g.p, pat: g.p, opts: o.map(x => x.t), ans: o[ans].t },
     mount() {
@@ -556,7 +556,7 @@ function listenQuestion(item) {
   return {
     meta: { mod: "听力", q: item.q, opts: item.o, ans: item.o[item.a] },
     html: `<div class="q-panel">
-      <p class="dim center mb">🎧 听录音，选择正确答案</p>
+      <p class="dim center mb">🎧 听录音，选择正确答案 <span class="badge">自编题</span></p>
       <div class="center mb"><button class="pixel-btn blue audio-btn" id="play1">▶ 播放录音</button>
       <button class="pixel-btn ghost small" id="play2">慢速重听</button></div>
       <p class="dim center mb" style="font-size:13px">🗣 ${item.q}</p>
