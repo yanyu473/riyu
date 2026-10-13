@@ -488,9 +488,11 @@ function buildVocabSession(unitNo) {
   dueWords.forEach(w => {
     const rq = unitNo ? null : REAL("vocab").find(it => {          // 到期词若有对应真题 → 优先用真题
       const a = (it.opts || [])[it.ans] || "";
-      return a === w || (it.q || "").includes(w) || (it.exp || "").includes("「" + w + "」");
+      const br = (it.q || "").match(/[（(]([^）)]+)[）)]/);
+      const t1 = br ? br[1] : "";
+      return a === w || t1 === w || (it.exp || "").includes("「" + w + "」");   // 只认精确匹配（原 it.q.includes 会匹配到非考点题）
     });
-    if (rq) { const q = realQ(rq); if (!inQs(q)) { qs.push(q); return; } }
+    if (rq) { const q = realQ(rq); if (!inQs(q)) { qs.push(q); saveRecent("word", [rq.q]); return; } }   // 记入防重复，避免补充阶段再抽到同一道
     const v = pool.find(x => x.w === w);
     if (v) { const q = vocabQuestion(v); if (q && !inQs(q)) qs.push(q); }
   });
@@ -603,7 +605,7 @@ function buildGramSession(unitNo) {
   // ② 真题补充（未做过的优先）
   const realN = unitNo ? 0 : Math.min(cap - qs.length, 5);
   freshShuffle(REAL("gram"), it => it.q, "gram").slice(0, realN).map(realQ)
-    .forEach(q => { if (!inQt(q.meta.q)) qs.push(q); });
+    .forEach(q => { if (!inQt(q.meta.q) && (!q.meta.pat || !inQp(q.meta.pat))) qs.push(q); });   // 排除与已选句型重复
 
   // ③ 自编填充：未掌握句型优先（短板）→ 已掌握垫底，排除到期集合
   const weakP = pool.filter(g => !Store.gramKnown(g.p) && !dueSet.has(g.p));
@@ -947,7 +949,8 @@ function buildFlipSession() {
   const list = VOCAB();
   if (list.length < 4) return toast("词汇数据加载中，请稍候…");
   const q = Store.srsQueue();
-  const words = [...q.due, ...q.fresh].map(w => list.find(v => v.w === w)).filter(Boolean);
+  const MAX_CARDS = 20;                       // 单次上限：到期词多时分批复习（到期词排前，新词随后）
+  const words = [...q.due, ...q.fresh].slice(0, MAX_CARDS).map(w => list.find(v => v.w === w)).filter(Boolean);
   if (!words.length) return toast("🎉 今日复习已清空、新词额度已用完，明天记得来拦截遗忘！");
   flip = { words, i: 0, revealed: false, res: { ok: 0, hard: 0, miss: 0, xp: 0 }, dueN: q.due.length, newN: q.fresh.length };
   renderFlip();
@@ -1136,7 +1139,7 @@ function homePage() {
   const lv = levelOf(st.xp), cur = xpForLevel(lv), next = xpForLevel(lv + 1);
   const pct = Math.round((st.xp - cur) / (next - cur) * 100);
   const dl = Store.daysLeft(), ph = phaseInfo(dl);
-  const dayLearned = Object.values(st.srs).filter(v => (v.nd || "").slice(0, 10) === Store.todayStr()).length;
+  const dayLearned = Object.entries(st.srs).filter(([k, v]) => !k.startsWith("g:") && (v.nd || "").slice(0, 10) === Store.todayStr()).length;
   const firstToday = !localStorage.getItem(greetKey());
   if (firstToday) localStorage.setItem(greetKey(), "1");
   const line = firstToday
@@ -1309,7 +1312,7 @@ function practiceHub() {
       <div class="stat-row" style="margin-top:0">
         <div class="stat"><span class="num">${srs.due}</span><span class="lab">今日到期（复习优先）</span></div>
         <div class="stat"><span class="num">${srs.learn}</span><span class="lab">学习中（5m/30m/12h拦截）</span></div>
-        <div class="stat"><span class="num">${Math.max(0, (Store.state.newLimit || 8) - Object.values(Store.state.srs).filter(v => (v.nd || "").slice(0, 10) === Store.todayStr()).length)}/${Store.state.newLimit || 8}</span><span class="lab">今日新词额度</span></div>
+        <div class="stat"><span class="num">${Math.max(0, (Store.state.newLimit || 8) - Object.entries(Store.state.srs).filter(([k, v]) => !k.startsWith("g:") && (v.nd || "").slice(0, 10) === Store.todayStr()).length)}/${Store.state.newLimit || 8}</span><span class="lab">今日新词额度</span></div>
         <div class="stat"><span class="num">${srs.total}</span><span class="lab">已进入记忆系统</span></div>
       </div>
       <div class="center mt"><button class="pixel-btn primary" onclick="location.hash='#/practice/flip'">▶ 开始今日记忆（主动回想）</button></div>
@@ -1392,7 +1395,7 @@ function progressPage() {
     { k: "听力", v: sc.listening }, { k: "口语", v: sc.speaking },
     { k: "单元", v: Math.round(sc.unitDone / 8 * 100) }
   ];
-  const mastery = [0, 1, 2].map(lv => Object.values(st.words).filter(v => v === lv).length);
+  const mastery = [0, 1, 2].map(lv => Object.entries(st.words).filter(([k, v]) => !k.startsWith("g:") && v === lv).length);
   const srs = Store.srsStats();
   h(`
     <div class="sec-title">学习进度 · PROGRESS</div>
