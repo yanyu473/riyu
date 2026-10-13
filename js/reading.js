@@ -38,7 +38,7 @@ window.READ_QS = [
   { t: "sort", q: "次の文を並べ替えて、正しい順番を選べ。",
     opts: ["③②①④", "③①②④", "②③①④", "①③②④"], ans: 0,
     passage: `次の4文を正しく並べ替える問題です。<br>① そこで、私たちは町の図書館に相談に行った。<br>② 環境問題に関心を持つ若者が増えているのだ。<br>③ 最近、ボランティア活動に参加する人が増えてきた。<br>④ すると、市の担当者は喜んで協力してくれた。`,
-    exp: "③现象→②解释原因→③接着「そこで」采取行动→④「すると」结果。指代与接续词锁定顺序。" },
+    exp: "③现象→②解释原因→①接着「そこで」采取行动→④「すると」结果。指代与接续词锁定顺序。" },
   { t: "sort", q: "文の並べ替えとして正しいものは？",
     opts: ["②④①③", "④②③①", "②①④③", "①②④③"], ans: 2,
     passage: `① まず、予算を確認する必要がある。<br>② 新しい企画を始めたいと考えている。<br>③ その結果、役員会で承認してもらえた。<br>④ そこで、詳しい計画書を作成した。`,
@@ -156,14 +156,16 @@ function analyzeSentence(raw) {
 
 /* ---------- 阅读页面 ---------- */
 function readingPage() {
+  const cnt = id => window.READ_QS.filter(x => x.t === id).length;
+  const sessN = id => id === "short" ? 15 + Math.min(5, cnt(id)) : Math.min(10, cnt(id));
   h(`
     <div class="sec-title">阅读题型专项 · READING（自编题）</div>
     <div class="grid c4 mb">
       ${window.READ_TYPES.map(t => `
         <div class="pixel-panel module-card" style="cursor:pointer" onclick="buildReadSession('${t.id}')">
           <span class="ico">${t.ico}</span><h3>${t.name}</h3>
-          <div class="mini-stat">${t.sub}</div><p>${t.en}</p>
-          <button class="pixel-btn blue small">开始5题 ▶</button>
+          <div class="mini-stat">题库${cnt(t.id)}题 · 每次${sessN(t.id)}题</div><p>${t.en}</p>
+          <button class="pixel-btn blue small">开始${sessN(t.id)}题 ▶</button>
         </div>`).join("")}
     </div>
     <div class="pixel-panel mb">
@@ -206,8 +208,11 @@ function readQuestion(t) {
 function buildReadSession(typeId) {
   const pool = window.READ_QS.filter(q => q.t === typeId);
   // 往年真题读解（未细分题型）集中进「短中篇」组
-  const realRead = typeId === "short" ? shuffle((window.REALQ_N2 || []).concat(window.REALQ_N2_EXT || [])).filter(x => x.type === "read").slice(0, 15) : [];
-  const qs = [...realRead.map(realQ), ...pool.map(readQuestion)];
+  const allRead = (window.REALQ_N2 || []).concat(window.REALQ_N2_EXT || []).filter(x => x.type === "read");
+  const realRead = typeId === "short" ? freshShuffle(allRead, x => x.q, "read").slice(0, 15) : [];
+  const selfQs = freshShuffle(pool, x => x.q, "read").slice(0, typeId === "short" ? 5 : 10);
+  saveRecent("read", [...realRead.map(x => x.q), ...selfQs.map(x => x.q)]);
+  const qs = [...realRead.map(realQ), ...selfQs.map(readQuestion)];
   if (!qs.length) return toast("该题型题目准备中");
   const name = (window.READ_TYPES.find(t => t.id === typeId) || {}).name || "阅读";
   startSession({ qs, kind: "read", title: `阅读·${name}${realRead.length ? "（含真题）" : ""}`,
