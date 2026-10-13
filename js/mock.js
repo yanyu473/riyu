@@ -7,7 +7,7 @@ function mockChoice(stem, opts, ans, explain) {
     html: `${stem}${opts.map((o, i) => `<button class="opt" data-i="${i}">${o}</button>`).join("")}`,
     mount() {
       app.querySelectorAll(".opt").forEach(b => b.onclick = () => {
-        if (mock.locked) return;
+        if (!mock || mock.locked) return;
         app.querySelectorAll(".opt").forEach(x => x.classList.remove("cur"));
         b.classList.add("cur");
         mock.ans[mock.i] = +b.dataset.i;
@@ -95,6 +95,7 @@ function mockRealQ(it) {
 
 /* ---------- 组卷 ---------- */
 function buildMock(part) {
+  if (mock && !mock.locked) return toast("有未完成的考试——请先到「模考」页继续或放弃本场");
   const list = VOCAB();
   if (list.length < 8) return toast("词汇数据加载中，请稍候…");
   const RQ = t => [...(window.REALQ_N2 || []), ...(window.REALQ_N2_EXT || [])].filter(x => x.type === t);
@@ -183,12 +184,13 @@ function ensureMockInteractive() {
   const rv = document.getElementById("revealBtn");
   if (rv && !rv.onclick) rv.onclick = () => { const t = document.getElementById("rv"); if (t) t.classList.remove("hidden"); };
   const okB = document.getElementById("rvOk");
-  if (okB && !okB.onclick) okB.onclick = () => { mock.ans[mock.i] = 0; toast("记为「想起来」→ 下次回归间隔拉长 ✓"); renderMock(); };
+  if (okB && !okB.onclick) okB.onclick = () => { mock.ans[mock.i] = 0; toast("记为「想起来」→ 下次回归间隔拉长 ✓"); rvGo(); };
   const noB = document.getElementById("rvNo");
-  if (noB && !noB.onclick) noB.onclick = () => { mock.ans[mock.i] = 1; toast("记为「忘了」→ 明天重新回归"); renderMock(); };
+  if (noB && !noB.onclick) noB.onclick = () => { mock.ans[mock.i] = 1; toast("记为「忘了」→ 明天重新回归"); rvGo(); };
 }
+function rvGo() { if (mock.i + 1 >= mock.qs.length) finishMock(false); else mockNav(mock.i + 1); }   // 揭示型评分后前进
 function mockNav(i) { if (!mock || i < 0 || i >= mock.qs.length) return; mock.i = i; renderMock(); }
-function toggleMark() { mock.marked[mock.i] = !mock.marked[mock.i]; renderMock(); }
+function toggleMark() { if (!mock || mock.locked) return; mock.marked[mock.i] = !mock.marked[mock.i]; renderMock(); }
 
 /* ---------- 交卷与估分报告 ---------- */
 function finishMock(auto) {
@@ -393,6 +395,7 @@ function redoWrong(mod) {
   redoList(Store.state.wrongs.filter(x => x.mod === mod), `错题重做·${mod}`);
 }
 function redoList(items, title) {
+  if (mock && !mock.locked) return toast("有未完成的考试——请先继续或放弃本场，再开始重做");
   if (!items.length) return toast("该组没有错题");
   const qs = items.map(x => {
     const origKey = x.mod + "|" + x.q;
@@ -420,7 +423,7 @@ function redoList(items, title) {
     }
     // 无选项（如记忆卡）→ 揭示回忆型：揭示后用两个按钮选择「想起来/忘了」驱动排程
     return {
-      key: 0, exp: x.exp, origKey,
+      key: 0, exp: x.exp, origKey, optsText: [x.ans || "（本题无存档答案）", "✗ 还是忘了"],
       html: `<div class="q-panel center"><p class="dim mb">错题重做 · 先回忆再揭示</p>
         ${passFor(x) ? `<div class="passage" style="text-align:left">${passFor(x)}</div>` : ""}
         <div class="sentence" style="font-size:26px">${x.q}</div>
@@ -436,12 +439,12 @@ function redoList(items, title) {
         document.getElementById("rvOk").onclick = () => {
           mock.ans[mock.i] = 0;                       // 想起来 = 答对 → 下次间隔拉长
           toast("记为「想起来」→ 下次回归间隔拉长 ✓");
-          renderMock();
+          rvGo();                                     // 记录后自动进下一题（原先原地重置，用户以为没生效）
         };
         document.getElementById("rvNo").onclick = () => {
           mock.ans[mock.i] = 1;                       // 忘了 = 答错 → 明天重来
           toast("记为「忘了」→ 明天重新回归");
-          renderMock();
+          rvGo();
         };
       }
     };
