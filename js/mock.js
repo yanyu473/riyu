@@ -57,7 +57,7 @@ function mockListenQ(item) {
     mount() {
       document.getElementById("mplay").onclick = () => speak(item.t, .95);
       document.getElementById("mslow").onclick = () => speak(item.t, .65);
-      setTimeout(() => speak(item.t, .95), 400);
+      setTimeout(() => { if (document.getElementById("mplay")) speak(item.t, .95); }, 400);   // 已切走则不响
       app.querySelectorAll(".opt").forEach(b => b.onclick = () => {
         if (mock.locked) return;
         app.querySelectorAll(".opt").forEach(x => x.classList.remove("cur"));
@@ -87,7 +87,7 @@ function mockRealQ(it) {
     if (q.listenT) {
       document.getElementById("mplay").onclick = () => speak(q.listenT, .95);
       document.getElementById("mslow").onclick = () => speak(q.listenT, .65);
-      setTimeout(() => speak(q.listenT, .95), 400);
+      setTimeout(() => { if (document.getElementById("mplay")) speak(q.listenT, .95); }, 400);   // 已切走则不响
     }
   };
   return q;
@@ -220,7 +220,7 @@ function finishMock(auto) {
   const est = Math.round(stats.reduce((a, s) => a + s.rate * 60, 0));
   const acc = Math.round(stats.reduce((a, s) => a + s.c, 0) / Math.max(1, stats.reduce((a, s) => a + s.t, 0)) * 100);
   Store.state.stats.mockCount++;
-  Store.state.stats.bestMock = Math.max(Store.state.stats.bestMock, est);
+  Store.state.stats.bestMock = Math.max(Store.state.stats.bestMock || 0, mockEst180({ est: est, part: m.partName }));   // 统一180口径
   Store.state.mockHistory = Store.state.mockHistory || [];
   Store.state.mockHistory.push({ d: Store.todayStr(), part: m.partName, est, acc });
   Store.state.mockHistory = Store.state.mockHistory.slice(-12);
@@ -247,8 +247,9 @@ function finishMock(auto) {
   h(`
     <div class="q-panel result-box">
       <div class="sec-title">模考报告 · ${m.partName}</div>
-      <div class="big">${est}<span style="font-size:16px"> / 180</span></div>
+      <div class="big">${mockEst180({ est: est, part: m.partName })}<span style="font-size:16px"> / 180</span></div>
       <p class="badge red">⚠ 估分为非官方口径：按题数正确率折算，JLPT 官方只公布总分不公布单部分分</p>
+      ${m.bounds.length < 3 ? `<p class="dim" style="font-size:12px">局部模考（${m.partName}）已折算为180分制口径 · 本场原始贡献分 ${est}</p>` : ""}
       <div class="stat-row">
         ${stats.map(s => `<div class="stat"><span class="num">${Math.round(s.rate * 100)}%</span>
           <span class="lab">${s.name} ${s.c}/${s.t}</span></div>`).join("")}
@@ -279,10 +280,12 @@ function finishMock(auto) {
 function passFor(x) {
   if (x.pass) return x.pass;
   const pool = (window.READ_QS || []).concat(window.REALQ_N2 || [], window.REALQ_N2_EXT || []);
+  const sameOpts = q => x.opts && q.opts && q.opts.length === x.opts.length && q.opts.every((o, i) => o === x.opts[i]);
   const byQ = pool.filter(q => q && q.q === x.q);
-  const exact = byQ.find(q => x.opts && q.opts && q.opts.length === x.opts.length &&
-    q.opts.every((o, i) => o === x.opts[i]));
+  const exact = byQ.find(sameOpts);
   if (exact) return exact.passage || "";
+  const byOpts = pool.filter(q => q && sameOpts(q));      // 旧模考错题的题干是截断材料 → 选项唯一匹配兜底
+  if (byOpts.length === 1) return byOpts[0].passage || "";
   return byQ.length === 1 ? (byQ[0].passage || "") : "";
 }
 function qText(q) {
@@ -292,10 +295,22 @@ function qText(q) {
 }
 
 /* ---------- 模考入口页 ---------- */
+function resumeMock() { if (!mock || mock.locked) return; mock.paused = false; startMockTimer(); renderMock(); }
+function abandonMock() {
+  if (!confirm("确定放弃本场？已作答内容不计入任何成绩")) return;
+  if (mockTimer) clearInterval(mockTimer);
+  mock = null; toast("已放弃本场"); mockPage();
+}
 function mockPage() {
   const st = Store.state.stats;
   h(`
     <div class="sec-title">全真模考 · MOCK EXAM</div>
+    ${mock && !mock.locked ? `<div class="pixel-panel light mb" style="border-color:var(--gold)">
+      <div class="sec-title">⏸ 未完成的${mock.isRedo ? "错题回归" : "考试"} · ${mock.partName}</div>
+      <p class="dim mb" style="font-size:13px">剩余 <b style="color:var(--gold)">${fmtTime(mock.secs)}</b> · 已答 ${Object.keys(mock.ans).length}/${mock.qs.length} 题（离开考场时已自动暂停计时，现场保留）</p>
+      <button class="pixel-btn primary" onclick="resumeMock()">▶ 继续本场</button>
+      <button class="pixel-btn red small" onclick="abandonMock()">放弃本场</button>
+    </div>` : ""}
     <p class="dim mb" style="font-size:14px">按真实 N2 卷面结构组卷 · 倒计时自动交卷 · 答题卡可标记「没把握」 · 交卷出估分报告<span class="badge red">估分非官方口径</span></p>
     <div class="grid c4 mb">
       <div class="pixel-panel module-card"><span class="ico">📝</span><h3>语言知识</h3>
