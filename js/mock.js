@@ -221,13 +221,18 @@ function finishMock(auto) {
   // 180分制估算：各部分正确率 × 60 分（三部分），局部模考按同口径折算并标注
   const est = Math.round(stats.reduce((a, s) => a + s.rate * 60, 0));
   const acc = Math.round(stats.reduce((a, s) => a + s.c, 0) / Math.max(1, stats.reduce((a, s) => a + s.t, 0)) * 100);
-  Store.state.stats.mockCount++;
-  Store.state.stats.bestMock = Math.max(Store.state.stats.bestMock || 0, mockEst180({ est: est, part: m.partName }));   // 统一180口径
-  Store.state.mockHistory = Store.state.mockHistory || [];
-  Store.state.mockHistory.push({ d: Store.todayStr(), part: m.partName, est, acc });
-  Store.state.mockHistory = Store.state.mockHistory.slice(-12);
-  Store.save();
-  Store.log(`模考[${m.partName}]：${acc}% 正确，估分 ${est}/180`);
+  if (!m.isRedo) {                                        // 错题回归≠模考：不计入考试次数/趋势/预测
+    Store.state.stats.mockCount++;
+    Store.state.stats.bestMock = Math.max(Store.state.stats.bestMock || 0, mockEst180({ est: est, part: m.partName }));   // 统一180口径
+    Store.state.mockHistory = Store.state.mockHistory || [];
+    Store.state.mockHistory.push({ d: Store.todayStr(), part: m.partName, est, acc });
+    Store.state.mockHistory = Store.state.mockHistory.slice(-12);
+    Store.save();
+    Store.log(`模考[${m.partName}]：${acc}% 正确，估分 ${est}/180`);
+  } else {
+    Store.log(`错题回归：${acc}% 正确（不计入模考趋势）`);
+    Store.save();
+  }
   Store.addXp(30 + Math.round(acc / 5));
   const taskByPart = { lang: "gram", read: "read", listen: "listen" };
   if (m.part === "all") ["gram", "read", "listen"].forEach(t => Store.markTask(t));
@@ -248,7 +253,7 @@ function finishMock(auto) {
   }[weak ? weak.name : "言語知識"] || [];
   h(`
     <div class="q-panel result-box">
-      <div class="sec-title">模考报告 · ${m.partName}</div>
+      <div class="sec-title">${m.isRedo ? "错题回归报告 · " : "模考报告 · "}${m.partName}</div>
       <div class="big">${mockEst180({ est: est, part: m.partName })}<span style="font-size:16px"> / 180</span></div>
       <p class="badge red">⚠ 估分为非官方口径：按题数正确率折算，JLPT 官方只公布总分不公布单部分分</p>
       ${m.bounds.length < 3 ? `<p class="dim" style="font-size:12px">局部模考（${m.partName}）已折算为180分制口径 · 本场原始贡献分 ${est}</p>` : ""}
