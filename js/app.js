@@ -20,6 +20,7 @@ function saveRecent(kind, keys) {
   const all = [...new Set([...keys, ...recentList(kind)])].slice(0, 150);   // 每类只记最近150条
   try { localStorage.setItem("px_recent_" + kind, JSON.stringify(all)); } catch (e) {}
 }
+const listenKey = it => it.q + "|" + (it.opts || it.o || [])[0] + "|" + (it.t || "").slice(0, 16);   // 同题干听力(3组)用首选项区分
 function freshShuffle(arr, keyFn, kind) {          // 没做过的排前面（各自洗牌），做过的垫底兜底
   const rec = new Set(recentList(kind));
   return [...shuffle(arr.filter(x => !rec.has(keyFn(x)))), ...shuffle(arr.filter(x => rec.has(keyFn(x))))];
@@ -596,7 +597,7 @@ function requireErrTag() {
   });
 }
 function buildListenSession(unitNo) {
-  const kf = it => it.q + "|" + (it.t || "").slice(0, 16);
+  const kf = listenKey;
   if (unitNo) {
     const u = window.UNITS_N2.find(x => x.no === unitNo);
     const pool = freshShuffle(window.LISTEN_N2, kf, "listen").slice(0, u && u.listen ? u.listen : 8);
@@ -701,8 +702,8 @@ function buildSpeedSession() {
   let pool = all.filter(x => (x.src || "").includes("即時応答"));
   if (pool.length < 5) pool = all;
   if (!pool.length) return toast("速答题库准备中");
-  const sp = freshShuffle(pool, it => it.q, "listen").slice(0, Math.min(10, pool.length));
-  saveRecent("listen", sp.map(it => it.q));
+  const sp = freshShuffle(pool, listenKey, "listen").slice(0, Math.min(10, pool.length));
+  saveRecent("listen", sp.map(listenKey));
   const qs = sp.map(realQ);
   startSession({ qs, kind: "listen", title: "⚡ 即時応答速训",
     build: buildSpeedSession,
