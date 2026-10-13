@@ -171,9 +171,10 @@ const Store = (() => {
     const p = x => String(x).padStart(2, "0");
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} 00:00`; };
 
-  function srsDue(limit) {                       // 到期队列：学习中(拦截复习)优先，再复习中
-    const t = nowStr();
-    const all = Object.entries(cur.srs).filter(([, v]) => v.due <= t);
+  function srsDue(limit, ns) {                  // 到期队列：学习中(拦截复习)优先，再复习中
+    const t = nowStr();                          // ns="g:" 只取语法句型；省略时只取单词（排除语法前缀）
+    const inNs = k => ns ? k.startsWith(ns) : !k.startsWith("g:");
+    const all = Object.entries(cur.srs).filter(([k, v]) => inNs(k) && v.due <= t);
     const l0 = all.filter(([, v]) => v.l === 0), l2 = all.filter(([, v]) => v.l === 2);
     return [...l0, ...l2].slice(0, limit).map(([w]) => w);
   }
@@ -215,7 +216,7 @@ const Store = (() => {
     save();
   }
   function srsStats() {
-    const v = Object.values(cur.srs), t = nowStr();
+    const v = Object.entries(cur.srs).filter(([k]) => !k.startsWith("g:")).map(([, x]) => x), t = nowStr();   // 只统计单词空间
     const days = [0, 1, 2, 3, 4, 5, 6].map(d => {
       const a = shiftDay(d).slice(0, 10), b = shiftDay(d + 1).slice(0, 10);
       return v.filter(x => x.due.slice(0, 10) >= a && x.due.slice(0, 10) < b).length;
