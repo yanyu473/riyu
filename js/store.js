@@ -62,6 +62,8 @@ const Store = (() => {
     s.stats = Object.assign(defState().stats, (saved && saved.stats) || {});
     // 旧数据迁移：错题补排程字段（无 due 视为今天到期回归）
     (s.wrongs || []).forEach(w => { if (!w.due) w.due = today(); if (w.lv == null) w.lv = 0; });
+    // 旧数据迁移：早期版本曾把语法句型键(g:)误写入「词汇掌握表」，清理脏数据（语法只应存于 srs）
+    Object.keys(s.words || {}).forEach(k => { if (k.startsWith("g:")) delete s.words[k]; });
     return s;
   }
 
@@ -183,7 +185,7 @@ const Store = (() => {
     const d = today();
     const started = new Set(Object.keys(cur.srs));
     const pool = (window.VOCAB_N2 || []).filter(v => !started.has(v.w));
-    const todayNew = Object.values(cur.srs).filter(v => (v.nd || "").slice(0, 10) === d).length;
+    const todayNew = Object.entries(cur.srs).filter(([k, v]) => !k.startsWith("g:") && (v.nd || "").slice(0, 10) === d).length;   // 只算单词，语法不占新词额度
     return pool.slice(0, Math.max(0, cap - todayNew)).map(v => v.w);
   }
   const setNewLimit = n => { if ([8, 12, 20].includes(n)) { cur.newLimit = n; save(); } };
@@ -196,20 +198,21 @@ const Store = (() => {
     const quality = [1, 3, 4, 5][q];                     // 映射 SM-2 的 0-5 质量分
     // EF 更新（SM-2 公式，下限 1.3）
     c.e = Math.max(1.3, c.e + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02)));
+    const isGram = w.startsWith("g:");                    // 语法句型不写入「单词掌握度」表，避免污染词汇统计
     if (quality < 3) {                                    // 忘了 → 回炉：5分钟后重来（艾宾浩斯第1节点）
       c.l = 0; c.st = 0; c.i = 0; c.due = shiftMin(5); c.e = Math.max(1.3, c.e - 0.2);
-      cur.words[w] = 0;
+      if (!isGram) cur.words[w] = 0;
     } else if (c.l === 0) {                               // 学习阶段：5分钟 → 30分钟 → 12小时 → 毕业
       c.st = (c.st || 0) + 1;
       if (c.st === 1) c.due = shiftMin(5);
       else if (c.st === 2) c.due = shiftMin(30);
       else { c.due = shiftMin(720); c.l = 2; c.i = 1; c.st = 0; c.n = 1; }   // 12小时后毕业，次日首复习
-      cur.words[w] = Math.min(2, (cur.words[w] || 0) + 1);
+      if (!isGram) cur.words[w] = Math.min(2, (cur.words[w] || 0) + 1);
     } else {                                              // 复习阶段：SM-2 间隔扩张 1天→6天→×EF
       c.n = (c.n || 0) + 1;
       c.i = c.i <= 1 ? 6 : Math.max(2, Math.round(c.i * c.e));
       c.due = shiftDay(c.i);
-      cur.words[w] = Math.min(2, (cur.words[w] || 0) + 1);
+      if (!isGram) cur.words[w] = Math.min(2, (cur.words[w] || 0) + 1);
     }
     if (!c.nd) c.nd = today();
     cur.srs[w] = c;
@@ -268,7 +271,7 @@ const Store = (() => {
     const s = cur.stats;
     const pct = (c, t) => t ? Math.round(c / t * 100) : 0;
     const wordList = window.VOCAB_N2 || [];
-    const known = Object.values(cur.words).filter(v => v >= 2).length;
+    const known = Object.entries(cur.words).filter(([k, v]) => !k.startsWith("g:") && v >= 2).length;   // 排除语法键
     const units = window.UNITS_N2;
     const unitDone = Object.values(cur.units).filter(u => u.done).length;
     return {
