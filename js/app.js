@@ -1188,7 +1188,7 @@ function homePage() {
         <div class="stat"><span class="num">${ins.goal.newToday}/${ins.goal.newLimit}</span><span class="lab">今日新词</span>
           <div class="bar blue mt" style="height:10px"><i style="width:${Math.min(100, Math.round(ins.goal.newToday / Math.max(1, ins.goal.newLimit) * 100))}%"></i></div></div>
         <div class="stat"><span class="num">${ins.goal.dueLeft}</span><span class="lab">待复习（到期）</span></div>
-        <div class="stat"><span class="num">${ins.riskW.length}</span><span class="lab">高风险词 ⚠</span></div>
+        <div class="stat"><span class="num">${ins.riskN}</span><span class="lab">高风险词 ⚠</span></div>
       </div>
       <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
         ${ins.tips.map(t => `<div style="display:flex;align-items:center;gap:10px;background:rgba(10,8,24,.4);border:2px solid var(--line);border-radius:10px;padding:10px 12px">
