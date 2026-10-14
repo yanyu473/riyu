@@ -64,6 +64,17 @@ const Store = (() => {
     (s.wrongs || []).forEach(w => { if (!w.due) w.due = today(); if (w.lv == null) w.lv = 0; });
     // 旧数据迁移：早期版本曾把语法句型键(g:)误写入「词汇掌握表」，清理脏数据（语法只应存于 srs）
     Object.keys(s.words || {}).forEach(k => { if (k.startsWith("g:")) delete s.words[k]; });
+    // 旧数据迁移：清理词库/语法库中已不存在的残留键（早期测试数据、废弃键名），
+    // 否则会虚增「到期/进入记忆系统」统计，并污染遗忘预警（预警里会出现 test_word 之类的假词）
+    const vw = new Set((window.VOCAB_N2 || []).map(v => v.w));
+    const gp = new Set((window.GRAMMAR_N2 || []).map(g => g.p));
+    if (vw.size && gp.size) {
+      Object.keys(s.srs || {}).forEach(k => {
+        if (k.startsWith("g:")) { if (!gp.has(k.slice(2))) delete s.srs[k]; }
+        else if (!vw.has(k)) delete s.srs[k];
+      });
+      Object.keys(s.words || {}).forEach(k => { if (!vw.has(k)) delete s.words[k]; });
+    }
     return s;
   }
 
@@ -221,8 +232,10 @@ const Store = (() => {
   function srsStats() {
     const v = Object.entries(cur.srs).filter(([k]) => !k.startsWith("g:")).map(([, x]) => x), t = nowStr();   // 只统计单词空间
     const days = [0, 1, 2, 3, 4, 5, 6].map(d => {
-      const a = shiftDay(d).slice(0, 10), b = shiftDay(d + 1).slice(0, 10);
-      return v.filter(x => x.due.slice(0, 10) >= a && x.due.slice(0, 10) < b).length;
+      const b = shiftDay(d + 1).slice(0, 10);
+      // 第0格=「今天」：含全部逾期未复习的，否则图表「今天」会小于上方「今日到期」计数，前后矛盾
+      return v.filter(x => d === 0 ? x.due.slice(0, 10) < b
+        : (x.due.slice(0, 10) >= shiftDay(d).slice(0, 10) && x.due.slice(0, 10) < b)).length;
     });
     return { learn: v.filter(x => x.l === 0).length, review: v.filter(x => x.l === 2).length,
       due: v.filter(x => x.due <= t).length, total: v.length, forecast: days };
@@ -275,7 +288,7 @@ const Store = (() => {
     else if (goal.dueLeft) diagnose = "有 " + goal.dueLeft + " 个到期内容正处遗忘临界点，现在复习性价比最高";
     else diagnose = "状态不错，按计划推进即可";
 
-    return { dueW: dueW.length, dueG: dueG.length, riskW: riskW.slice(0, 8), riskG: riskG.slice(0, 5),
+    return { dueW: dueW.length, dueG: dueG.length, riskN: riskW.length, riskW: riskW.slice(0, 8), riskG: riskG.slice(0, 5),
       tips: tips.slice(0, 3), acc: { vocab: vA, gram: acc("gram"), listen: acc("listen") }, days: daysLeft(),
       goal, diagnose };
   }
