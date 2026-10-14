@@ -240,8 +240,8 @@ function finishMock(auto) {
   const got = Store.checkAch();
   beep(acc >= 50 ? "win" : "bad");
 
-  const weak = [...stats].filter(s => s.t).sort((a, b) => a.rate - b.rate).pop();
-  const strong = [...stats].filter(s => s.t).sort((a, b) => b.rate - a.rate).pop();
+  const weak = [...stats].filter(s => s.t).sort((a, b) => a.rate - b.rate)[0];     // 最弱 = 正确率最低（原先用 pop() 取到了最高的，强弱判断反了）
+  const strong = [...stats].filter(s => s.t).sort((a, b) => b.rate - a.rate)[0];   // 最强 = 正确率最高
   const onePart = stats.filter(s => s.t).length <= 1;
   const diag = onePart
     ? `💬 本卷只测 <b style="color:var(--pink)">${weak ? weak.name : "—"}</b>：正确率 ${Math.round((weak ? weak.rate : 0) * 100)}% —— ${weak && weak.rate < .5 ? "这里就是你最直接的提分空间，错题解析逐条啃掉" : "保持这个手感，冲80%以上！"}`
