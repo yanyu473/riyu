@@ -51,13 +51,13 @@ function mockListenQ(item) {
     key: item.a, exp: item.t,
     html: `<div class="q-panel">
       <div class="center mb"><button class="pixel-btn blue audio-btn" id="mplay">▶ 播放录音</button>
-      <button class="pixel-btn ghost small" id="mslow">慢速重听</button></div>
+      <button class="pixel-btn ghost small" id="mslow">慢速重听</button><span class="badge" style="margin-left:6px">🎭 男女分声</span></div>
       <p class="dim center mb" style="font-size:13px">🗣 ${item.q}</p>
       ${item.o.map((t, i) => `<button class="opt" data-i="${i}">${t}</button>`).join("")}</div>`,
     mount() {
-      document.getElementById("mplay").onclick = () => speak(item.t, .95);
-      document.getElementById("mslow").onclick = () => speak(item.t, .65);
-      setTimeout(() => { if (document.getElementById("mplay")) speak(item.t, .95); }, 400);   // 已切走则不响
+      document.getElementById("mplay").onclick = () => speakDialogue(item.t, .95);
+      document.getElementById("mslow").onclick = () => speakDialogue(item.t, .68);
+      setTimeout(() => { if (document.getElementById("mplay")) speakDialogue(item.t, .95); }, 400);   // 已切走则不响
       app.querySelectorAll(".opt").forEach(b => b.onclick = () => {
         if (mock.locked) return;
         app.querySelectorAll(".opt").forEach(x => x.classList.remove("cur"));
@@ -75,7 +75,7 @@ function mockRealQ(it) {
   const stem = `<div class="q-panel">
     ${it.passage ? `<div class="passage">${it.passage}</div>` : ""}
     ${isListen ? `<div class="center mb"><button class="pixel-btn blue audio-btn" id="mplay">▶ 播放录音</button>
-      <button class="pixel-btn ghost small" id="mslow">慢速重听</button></div>` : ""}
+      <button class="pixel-btn ghost small" id="mslow">慢速重听</button><span class="badge" style="margin-left:6px">🎭 男女分声</span></div>` : ""}
     <p class="dim center mb" style="color:var(--pink)">❓ ${it.q} <span class="badge gold">${it.src || "往年真题"}</span></p>`;
   const q = mockChoice(stem, it.opts, it.ans, `<b>📌 ${it.src || "往年真题"} · 详解</b><br>${it.exp}`);
   q.listenT = isListen ? it.t : null;
@@ -85,9 +85,9 @@ function mockRealQ(it) {
   q.mount = function () {
     oldMount();
     if (q.listenT) {
-      document.getElementById("mplay").onclick = () => speak(q.listenT, .95);
-      document.getElementById("mslow").onclick = () => speak(q.listenT, .65);
-      setTimeout(() => { if (document.getElementById("mplay")) speak(q.listenT, .95); }, 400);   // 已切走则不响
+      document.getElementById("mplay").onclick = () => speakDialogue(q.listenT, .95);
+      document.getElementById("mslow").onclick = () => speakDialogue(q.listenT, .68);
+      setTimeout(() => { if (document.getElementById("mplay")) speakDialogue(q.listenT, .95); }, 400);   // 已切走则不响
     }
   };
   return q;
