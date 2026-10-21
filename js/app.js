@@ -82,6 +82,95 @@ function speak(text, rate, lang) {
   try { speechSynthesis.resume(); } catch (e) {}
   keepAlive();
 }
+/* ---------- 对话朗读：按角色分男女音色（听力真题多人对话） ---------- */
+const VOICE_M = /(ichiro|keita|daichi|otoya|takumi|kenta|male|男声|男)/i;
+const VOICE_F = /(haruka|ayumi|nanami|sayaka|kyoko|mizuki|female|女声|google)/i;
+const _jaV = () => { refreshVoices(); return voices.filter(v => (v.lang || "").toLowerCase().replace("_", "-").startsWith("ja")); };
+function pickMaleV() { const j = _jaV(); return j.find(v => VOICE_M.test(v.name || "")) || null; }
+function pickFemaleV() { const j = _jaV(); return j.find(v => VOICE_F.test(v.name || "")) || j.find(v => !VOICE_M.test(v.name || "")) || null; }
+
+/* 角色 → 性别（男群/女群；先生・アナウンサー等按旁白提示判定） */
+function spkGender(label) {
+  const l = String(label || "").replace(/[０-９0-9]/g, "");
+  if (/^(男|父|息子|兄|弟|夫|彼|店長|部長|課長|社長|医者|監督|画家|経営者|農家|実習生|店員)/.test(l)) return "m";
+  if (/^(女|母|娘|姉|妹|妻|彼女|受付)/.test(l)) return "f";
+  return "";
+}
+function roleHints(text) {                        // 从旁白「男のアナウンサー」「女の先生」提取角色性别
+  const hint = {}, re = /(男|女)(?:の)?(アナウンサー|先生|学生|店員|医者|監督|画家|経営者|農家|実習生|社員|人)/g;
+  let m; while ((m = re.exec(String(text || "")))) if (!hint[m[2]]) hint[m[2]] = m[1] === "男" ? "m" : "f";
+  return hint;
+}
+/* 把「男：…女：…」拆成逐句分段（旁白单独一段） */
+function splitDialogue(text) {
+  const t = String(text || "").replace(/\r/g, "");
+  const re = /(^|[。．.!?！？、\s\u3000])((?:男|女)(?:の学生|の先生|の人|[１２12])?|父|母|息子|娘|兄|姉|弟|妹|夫|妻|先生|学生|店長|部長|課長|社長|医者|監督|画家|経営者|農家|実習生|店員|係員|客|受付|アナウンサー|レポーター|ナレーター|司会|運転手)[：:]/g;
+  const out = []; let last = 0, m, cur = null;
+  while ((m = re.exec(t))) {
+    const before = (t.slice(last, m.index) + (m[1] || "")).trim();
+    if (before) { if (cur) cur.text += before; else { cur = { sp: "", text: before }; out.push(cur); } }
+    cur = { sp: m[2], text: "" }; out.push(cur);
+    last = re.lastIndex;
+  }
+  const rest = t.slice(last).trim();
+  if (rest) { if (cur) cur.text += rest; else out.push({ sp: "", text: rest }); }
+  const tail = out[out.length - 1];                 // 转录末尾的「题干（＋选项）」：改为旁白读，不混入角色台词
+  if (tail && tail.sp) {
+    const m = tail.text.match(/^(.*?[。！？]\s*)([^。！？]{4,}[？?][\s\S]*)$/);
+    if (m) { tail.text = m[1].trim(); out.push({ sp: "", text: m[2].trim() }); }
+  }
+  return out.map(x => ({ sp: x.sp, text: x.text.trim() })).filter(x => x.text);
+}
+let _dlgTok = 0, _soloWarned = false;
+function stopSpeak() { _dlgTok++; try { speechSynthesis.cancel(); } catch (e) {} }
+function speakDialogue(text, rate, lang) {
+  if (!("speechSynthesis" in window)) { toast("🚫 此浏览器不支持语音合成（vivo等国产浏览器已裁剪）——请用 Chrome 打开本页", "ach"); return; }
+  refreshVoices();
+  const segs = splitDialogue(text);
+  if (segs.length < 2) return speak(text, rate, lang);        // 独白/单句：走原逻辑
+  stopSpeak();
+  const tok = _dlgTok, hint = roleHints(text);
+  const mv = pickMaleV(), fv = pickFemaleV();
+  const solo = !mv || !fv;                                    // 只有一个日语音色 → 用音高区分
+  if (solo && !_soloWarned) {
+    _soloWarned = true;
+    toast("🎭 本机日语语音只有 1 个，已用高低音区分男女；想要更自然可在系统里添加「男声日语」语音包", "ach");
+  }
+  const base = rate || .95;
+  // 同一性别多角色（如 母・娘・息子）：按说话人分配不同音高，避免「谁在说」分不清
+  const resolveG = sp => spkGender(sp) || hint[String(sp || "").replace(/[１２12]$/, "")] || "";
+  const byG = { m: [], f: [] };
+  segs.forEach(x => { const g = resolveG(x.sp); if (g && byG[g].indexOf(x.sp) < 0) byG[g].push(x.sp); });
+  const pitchMap = {};
+  ["m", "f"].forEach(g => byG[g].forEach((sp, k) => {
+    const b = g === "m" ? (solo ? 0.62 : 0.92) : (solo ? 1.18 : 1.04);
+    pitchMap[sp] = Math.max(0.3, Math.min(1.8, b + (k % 3) * (g === "m" ? -0.06 : 0.07)));
+  }));
+  let i = 0;
+  const step = () => {
+    if (tok !== _dlgTok) return;
+    if (i >= segs.length) { if (_kae) { clearInterval(_kae); _kae = null; } return; }
+    const s = segs[i++];
+    const g = resolveG(s.sp);
+    const u = new SpeechSynthesisUtterance(s.text);
+    u.lang = lang || "ja-JP";
+    u.rate = base;
+    if (g === "m") { if (mv) u.voice = mv; u.pitch = pitchMap[s.sp] || (solo ? 0.62 : 0.92); }
+    else if (g === "f") { if (fv) u.voice = fv; u.pitch = pitchMap[s.sp] || (solo ? 1.18 : 1.04); }
+    else { if (fv || mv) u.voice = fv || mv; u.pitch = 1.0; u.rate = base * 0.97; }   // 旁白
+    u.onend = () => setTimeout(step, 180);
+    u.onerror = e => {
+      if (tok !== _dlgTok) return;
+      const err = e && e.error;
+      if (err && err !== "interrupted" && err !== "canceled") toast("🔇 播放失败：请点 ▶ 重试，并确认媒体音量已打开", "ach");
+      setTimeout(step, 60);
+    };
+    try { speechSynthesis.speak(u); } catch (e) { setTimeout(step, 60); }
+  };
+  setTimeout(step, 70);
+  keepAlive();
+}
+
 let _voiceWarned = false;
 function warnVoice(lang) {
   if (_voiceWarned) return;
@@ -292,7 +381,7 @@ function realQ(it) {
   const stem = `<div class="q-panel">
     ${it.passage ? `<div class="passage">${it.passage}</div>` : ""}
     ${isListen ? `<div class="center mb"><button class="pixel-btn blue audio-btn" id="rp1">▶ 播放录音</button>
-      <button class="pixel-btn ghost small" id="rp2">慢速重听</button></div>` : ""}
+      <button class="pixel-btn ghost small" id="rp2">慢速重听</button><span class="badge" style="margin-left:6px">🎭 男女分声</span></div>` : ""}
     ${it.type === "listen" && !it.t ? `<p class="dim center mb" style="font-size:12px">⚠ 该题暂无音频，以听力原文形式呈现（降级模式）</p>` : ""}
     <p class="dim center mb" style="color:var(--pink)">❓ ${it.q} <span class="badge gold">${it.src || "往年真题"}</span></p>`;
   return {
@@ -300,9 +389,9 @@ function realQ(it) {
     html: stem + it.opts.map((o, i) => `<button class="opt" data-i="${i}">${o}</button>`).join("") + `</div>`,
     mount() {
       if (isListen) {
-        document.getElementById("rp1").onclick = () => speak(it.t, .95);
-        document.getElementById("rp2").onclick = () => speak(it.t, .65);
-        setTimeout(() => { if (document.getElementById("rp1")) speak(it.t, .95); }, 400);   // 已切走则不响
+        document.getElementById("rp1").onclick = () => speakDialogue(it.t, .95);
+        document.getElementById("rp2").onclick = () => speakDialogue(it.t, .68);
+        setTimeout(() => { if (document.getElementById("rp1")) speakDialogue(it.t, .95); }, 400);   // 已切走则不响
       }
       if (it.type === "vocab") {                    // 真题词题：匹配本地词库 → 挂反复播音条
         const V = window.VOCAB_N2 || [];
@@ -635,14 +724,14 @@ function listenQuestion(item) {
     html: `<div class="q-panel">
       <p class="dim center mb">🎧 听录音，选择正确答案 <span class="badge">自编题</span></p>
       <div class="center mb"><button class="pixel-btn blue audio-btn" id="play1">▶ 播放录音</button>
-      <button class="pixel-btn ghost small" id="play2">慢速重听</button></div>
+      <button class="pixel-btn ghost small" id="play2">慢速重听</button><span class="badge" style="margin-left:6px">🎭 男女分声</span></div>
       <p class="dim center mb" style="font-size:13px">🗣 ${item.q}</p>
       ${item.o.map((t, i) => `<button class="opt" data-i="${i}">${t}</button>`).join("")}
     </div>`,
     mount() {
-      document.getElementById("play1").onclick = () => speak(item.t, .95);
-      document.getElementById("play2").onclick = () => speak(item.t, .65);
-      setTimeout(() => { if (document.getElementById("play1")) speak(item.t, .95); }, 350);   // 已切走则不响
+      document.getElementById("play1").onclick = () => speakDialogue(item.t, .95);
+      document.getElementById("play2").onclick = () => speakDialogue(item.t, .68);
+      setTimeout(() => { if (document.getElementById("play1")) speakDialogue(item.t, .95); }, 350);   // 已切走则不响
       app.querySelectorAll(".opt").forEach(b => b.onclick = () => {
         const i = +b.dataset.i;
         app.querySelectorAll(".opt").forEach((x, j) => { x.disabled = true; if (j === item.a) x.classList.add("correct"); else if (j === i) x.classList.add("wrong"); });
