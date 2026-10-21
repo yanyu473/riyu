@@ -86,8 +86,28 @@ function speak(text, rate, lang) {
 const VOICE_M = /(ichiro|keita|daichi|otoya|takumi|kenta|male|男声|男)/i;
 const VOICE_F = /(haruka|ayumi|nanami|sayaka|kyoko|mizuki|female|女声|google)/i;
 const _jaV = () => { refreshVoices(); return voices.filter(v => (v.lang || "").toLowerCase().replace("_", "-").startsWith("ja")); };
-function pickMaleV() { const j = _jaV(); return j.find(v => VOICE_M.test(v.name || "")) || null; }
-function pickFemaleV() { const j = _jaV(); return j.find(v => VOICE_F.test(v.name || "")) || j.find(v => !VOICE_M.test(v.name || "")) || null; }
+/* 用户可在「训练中心 → 听力音色」里手动指定男声/女声/旁白，并微调音高 */
+const vpref = () => { try { return JSON.parse(localStorage.getItem("px_voice") || "{}"); } catch (e) { return {}; } };
+function saveVpref(patch) { const p = Object.assign(vpref(), patch); try { localStorage.setItem("px_voice", JSON.stringify(p)); } catch (e) {} }
+const byURI = u => _jaV().find(v => v.voiceURI === u) || null;
+function pickMaleV() { const p = vpref().m; return (p && byURI(p)) || _jaV().find(v => VOICE_M.test(v.name || "")) || null; }
+function pickFemaleV() { const p = vpref().f; return (p && byURI(p)) || _jaV().find(v => VOICE_F.test(v.name || "")) || _jaV().find(v => !VOICE_M.test(v.name || "")) || null; }
+function pickNarrV() { const p = vpref().n; return (p && byURI(p)) || pickFemaleV() || pickMaleV(); }
+function voicePitchAdj() { const p = vpref(); return { m: +(p.mp || 0), f: +(p.fp || 0) }; }
+function setVoicePref(k, uri) { saveVpref({ [k]: uri }); toast(uri ? "✅ 已切换音色" : "✅ 已恢复自动挑选"); practiceHub(); }
+function setPitchPref(k, v) { saveVpref(k === "m" ? { mp: +v } : { fp: +v }); toast("✅ 音高已调整"); practiceHub(); }
+function previewVoice(k) {
+  if (!("speechSynthesis" in window)) { toast("🚫 此浏览器不支持语音合成", "ach"); return; }
+  refreshVoices(); stopSpeak();
+  const adj = voicePitchAdj();
+  const v = k === "m" ? pickMaleV() : k === "f" ? pickFemaleV() : pickNarrV();
+  const txt = k === "m" ? "こんにちは。男声のテストです。" : k === "f" ? "こんにちは。女声のテストです。" : "これはナレーションのテストです。";
+  const u = new SpeechSynthesisUtterance(txt);
+  u.lang = "ja-JP"; u.rate = .95;
+  if (v) u.voice = v;
+  u.pitch = Math.max(.3, Math.min(1.8, (k === "m" ? .92 : k === "f" ? 1.04 : 1.0) + (k === "m" ? adj.m : k === "f" ? adj.f : 0)));
+  try { speechSynthesis.speak(u); } catch (e) {}
+}
 
 /* 角色 → 性别（男群/女群；先生・アナウンサー等按旁白提示判定） */
 function spkGender(label) {
@@ -130,7 +150,7 @@ function speakDialogue(text, rate, lang) {
   if (segs.length < 2) return speak(text, rate, lang);        // 独白/单句：走原逻辑
   stopSpeak();
   const tok = _dlgTok, hint = roleHints(text);
-  const mv = pickMaleV(), fv = pickFemaleV();
+  const mv = pickMaleV(), fv = pickFemaleV(), nv = pickNarrV(), adj = voicePitchAdj();
   const solo = !mv || !fv;                                    // 只有一个日语音色 → 用音高区分
   if (solo && !_soloWarned) {
     _soloWarned = true;
@@ -143,7 +163,7 @@ function speakDialogue(text, rate, lang) {
   segs.forEach(x => { const g = resolveG(x.sp); if (g && byG[g].indexOf(x.sp) < 0) byG[g].push(x.sp); });
   const pitchMap = {};
   ["m", "f"].forEach(g => byG[g].forEach((sp, k) => {
-    const b = g === "m" ? (solo ? 0.62 : 0.92) : (solo ? 1.18 : 1.04);
+    const b = g === "m" ? (solo ? 0.62 : 0.92) + adj.m : (solo ? 1.18 : 1.04) + adj.f;
     pitchMap[sp] = Math.max(0.3, Math.min(1.8, b + (k % 3) * (g === "m" ? -0.06 : 0.07)));
   }));
   let i = 0;
@@ -157,7 +177,7 @@ function speakDialogue(text, rate, lang) {
     u.rate = base;
     if (g === "m") { if (mv) u.voice = mv; u.pitch = pitchMap[s.sp] || (solo ? 0.62 : 0.92); }
     else if (g === "f") { if (fv) u.voice = fv; u.pitch = pitchMap[s.sp] || (solo ? 1.18 : 1.04); }
-    else { if (fv || mv) u.voice = fv || mv; u.pitch = 1.0; u.rate = base * 0.97; }   // 旁白
+    else { if (nv || fv || mv) u.voice = nv || fv || mv; u.pitch = 1.0; u.rate = base * 0.97; }   // 旁白
     u.onend = () => setTimeout(step, 180);
     u.onerror = e => {
       if (tok !== _dlgTok) return;
@@ -1413,6 +1433,12 @@ function coursesPage() {
 
 function practiceHub() {
   const st = Store.state.stats, sc = Store.scores(), srs = Store.srsStats();
+  const vp = vpref(), jv = _jaV();
+  const vOpts = cur => `<option value="" ${!cur ? "selected" : ""}>自动挑选（推荐）</option>` + jv.map(v => {
+    const tag = VOICE_M.test(v.name || "") ? "♂ " : VOICE_F.test(v.name || "") ? "♀ " : "• ";
+    const nm = (v.name || "").replace("Microsoft ", "").replace(" Online (Natural) - Japanese (Japan)", "").replace(" - Japanese (Japan)", "");
+    return `<option value="${v.voiceURI}" ${cur === v.voiceURI ? "selected" : ""}>${tag}${nm}</option>`;
+  }).join("");
   h(`
     <div class="sec-title">训练中心 · PRACTICE</div>
     <div class="pixel-panel light mb">
@@ -1427,6 +1453,31 @@ function practiceHub() {
       <p class="center mt" style="font-size:12px;color:var(--dim)">每日新词额度：
         ${[8, 12, 20].map(n => `<button class="pixel-btn small ${ (Store.state.newLimit || 8) === n ? "primary" : "ghost"}" style="margin-left:6px" onclick="setNewLimitUI(${n})">${n}词</button>`).join("")}
         <span style="font-size:11px">（复习永远优先于新词）</span></p>
+    </div>
+    <div class="pixel-panel mb">
+      <div class="sec-title">🔊 听力音色 · VOICE</div>
+      <p style="font-size:12px;color:var(--dim);line-height:1.7">
+        本机检测到 <b style="color:var(--gold)">${jv.length}</b> 个日语语音。男女对话会自动分声；也可在此手动指定「男声 / 女声 / 旁白」，或微调音高做出更多音色。</p>
+      <div class="stat-row" style="margin-top:6px;flex-wrap:wrap;gap:10px">
+        <div class="stat" style="min-width:190px"><span class="lab">♂ 男声</span>
+          <select onchange="setVoicePref('m', this.value)" style="width:100%;margin-top:4px;background:#191a2e;color:#eae6ff;border:2px solid #5b4bd6;border-radius:4px;padding:6px;font-size:12px">${vOpts(vp.m)}</select>
+          <button class="pixel-btn ghost small" style="margin-top:6px" onclick="previewVoice('m')">▶ 试听</button></div>
+        <div class="stat" style="min-width:190px"><span class="lab">♀ 女声</span>
+          <select onchange="setVoicePref('f', this.value)" style="width:100%;margin-top:4px;background:#191a2e;color:#eae6ff;border:2px solid #5b4bd6;border-radius:4px;padding:6px;font-size:12px">${vOpts(vp.f)}</select>
+          <button class="pixel-btn ghost small" style="margin-top:6px" onclick="previewVoice('f')">▶ 试听</button></div>
+        <div class="stat" style="min-width:190px"><span class="lab">旁白</span>
+          <select onchange="setVoicePref('n', this.value)" style="width:100%;margin-top:4px;background:#191a2e;color:#eae6ff;border:2px solid #5b4bd6;border-radius:4px;padding:6px;font-size:12px">${vOpts(vp.n)}</select>
+          <button class="pixel-btn ghost small" style="margin-top:6px" onclick="previewVoice('n')">▶ 试听</button></div>
+      </div>
+      <p class="center mt" style="font-size:12px;color:var(--dim)">音高微调：
+        ♂ 男声 ${[-0.08, 0, 0.08].map(x => `<button class="pixel-btn small ${ +(vp.mp || 0) === x ? "primary" : "ghost"}" onclick="setPitchPref('m', ${x})">${x < 0 ? "偏低" : x > 0 ? "偏高" : "标准"}</button>`).join("")}
+        ♀ 女声 ${[-0.08, 0, 0.08].map(x => `<button class="pixel-btn small ${ +(vp.fp || 0) === x ? "primary" : "ghost"}" onclick="setPitchPref('f', ${x})">${x < 0 ? "偏低" : x > 0 ? "偏高" : "标准"}</button>`).join("")}
+      </p>
+      ${jv.length < 2 ? `<p style="font-size:11.5px;color:var(--orange);line-height:1.8">⚠ 本机只有 1 个日语语音，男声只能用「降低音高」模拟。想真正加音色，请安装系统日语语音包：<br>
+        · <b>Windows</b>：设置 → 时间和语言 → 语音 → 管理语音 → 添加语音 → 日语（Nanami 女声 / Keita 男声）<br>
+        · <b>Android</b>：设置 → 系统 → 语言和输入法 → 文字转语音输出 → Google 语音服务 → 安装语音数据 → 日语<br>
+        · <b>iPhone</b>：设置 → 辅助功能 → 朗读内容 → 声音 → 日语（Kyoko 女声 / Otoya 男声）<br>
+        装好后回到本页，下拉刷新即可看到更多音色。</p>` : ""}
     </div>
     <div class="grid c2">
       <div class="pixel-panel module-card">
