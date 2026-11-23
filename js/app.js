@@ -142,7 +142,20 @@ function splitDialogue(text) {
   return out.map(x => ({ sp: x.sp, text: x.text.trim() })).filter(x => x.text);
 }
 let _dlgTok = 0, _soloWarned = false;
-function stopSpeak() { _dlgTok++; try { speechSynthesis.cancel(); } catch (e) {} }
+function stopSpeak() {
+  _dlgTok++;
+  try { speechSynthesis.cancel(); } catch (e) {}
+  if (_kae) { clearInterval(_kae); _kae = null; }
+}
+function mergeSameSpeaker(segs) {          // 相邻同一说话人并成一句：切句越碎，引擎重启次数越多，越卡
+  const out = [];
+  segs.forEach(x => {
+    const prev = out[out.length - 1];
+    if (prev && prev.sp === x.sp) prev.text += (/[。！？?!、]$/.test(prev.text) ? "" : "。") + x.text;
+    else out.push({ sp: x.sp, text: x.text });
+  });
+  return out;
+}
 function speakDialogue(text, rate, lang) {
   if (!("speechSynthesis" in window)) { toast("🚫 此浏览器不支持语音合成（vivo等国产浏览器已裁剪）——请用 Chrome 打开本页", "ach"); return; }
   refreshVoices();
@@ -166,11 +179,10 @@ function speakDialogue(text, rate, lang) {
     const b = g === "m" ? (solo ? 0.62 : 0.92) + adj.m : (solo ? 1.18 : 1.04) + adj.f;
     pitchMap[sp] = Math.max(0.3, Math.min(1.8, b + (k % 3) * (g === "m" ? -0.06 : 0.07)));
   }));
-  let i = 0;
-  const step = () => {
-    if (tok !== _dlgTok) return;
-    if (i >= segs.length) { if (_kae) { clearInterval(_kae); _kae = null; } return; }
-    const s = segs[i++];
+  // 关键：一次性把全部句子排进语音队列，由浏览器连续播完。
+  // 旧做法是 onend 里再播下一句——每句都要重新启动一次合成引擎，听感就是「一卡一卡」。
+  const todo = mergeSameSpeaker(segs);
+  todo.forEach((s, idx) => {
     const g = resolveG(s.sp);
     const u = new SpeechSynthesisUtterance(s.text);
     u.lang = lang || "ja-JP";
@@ -178,16 +190,15 @@ function speakDialogue(text, rate, lang) {
     if (g === "m") { if (mv) u.voice = mv; u.pitch = pitchMap[s.sp] || (solo ? 0.62 : 0.92); }
     else if (g === "f") { if (fv) u.voice = fv; u.pitch = pitchMap[s.sp] || (solo ? 1.18 : 1.04); }
     else { if (nv || fv || mv) u.voice = nv || fv || mv; u.pitch = 1.0; u.rate = base * 0.97; }   // 旁白
-    u.onend = () => setTimeout(step, 180);
     u.onerror = e => {
       if (tok !== _dlgTok) return;
       const err = e && e.error;
       if (err && err !== "interrupted" && err !== "canceled") toast("🔇 播放失败：请点 ▶ 重试，并确认媒体音量已打开", "ach");
-      setTimeout(step, 60);
     };
-    try { speechSynthesis.speak(u); } catch (e) { setTimeout(step, 60); }
-  };
-  setTimeout(step, 70);
+    if (idx === todo.length - 1) u.onend = () => { if (_kae) { clearInterval(_kae); _kae = null; } };
+    try { speechSynthesis.speak(u); } catch (e) {}
+  });
+  try { speechSynthesis.resume(); } catch (e) {}     // 队列排好后立刻唤醒，避免首句迟滞
   keepAlive();
 }
 
@@ -254,6 +265,7 @@ function startSession(cfg) {
 }
 
 function renderQuestion() {
+  stopSpeak();                               // 换题先停旧音频，否则旧队列与新题音频重叠
   const s = session;
   if (s.i >= s.total) return finishSession();
   const q = s.qs[s.i];
@@ -287,6 +299,7 @@ function speedNote(ok) {
 function answer(ok, explainHtml) {
   const s = session, body = document.getElementById("qbody");
   if (s.locked) return;
+  stopSpeak();
   s.locked = true;
   if (ok) { s.correct++; s.combo++; s.bestCombo = Math.max(s.bestCombo, s.combo); s.xp += 10 + Math.min(s.combo - 1, 5) * 2; beep("ok"); }
   else {
