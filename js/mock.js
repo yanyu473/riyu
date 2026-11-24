@@ -376,7 +376,7 @@ function wrongbookPage() {
             ${x.lv ? `<span class="badge green">连对 ${x.lv} 次</span>` : ""}
             <span class="dim" style="font-size:11px">${x.date}</span>
             <p class="mt" style="font-size:16px">${x.q}</p>
-            ${passFor(x) ? `<details class="dim" style="font-size:13px"><summary style="cursor:pointer">📄 展开阅读材料</summary><div class="passage" style="margin-top:6px">${passFor(x)}</div></details>` : ""}
+            ${passFor(x) ? `<details class="dim" style="font-size:13px"><summary style="cursor:pointer">📄 展开${/听力/.test(x.mod) ? "听力原文" : "阅读材料"}</summary><div class="passage" style="margin-top:6px">${passFor(x)}</div></details>` : ""}
             ${x.opts && x.opts.length ? `<p class="dim" style="font-size:13px">选项：${x.opts.join(" ／ ")}</p>` : ""}
             <p style="color:var(--gold)">✔ ${x.ans || ""}</p>
             ${x.exp ? `<p class="dim" style="font-size:13px">${x.exp}</p>` : ""}
@@ -404,6 +404,30 @@ function redoList(items, title) {
   if (!items.length) return toast("该组没有错题");
   const qs = items.map(x => {
     const origKey = x.mod + "|" + x.q;
+    const isListen = /听力/.test(x.mod || "");
+    const tr = isListen ? (x.pass || (function () {
+      const hit = [...(window.REALQ_N2 || []), ...(window.REALQ_N2_EXT || [])].find(it => it.type === "listen" && it.q === x.q);
+      return hit ? (hit.t || "") : "";
+    })()) : "";
+    if (isListen && tr) {                                  // 听力错题：必须能重听原文，否则重做无意义
+      const o = shuffle([{ t: x.ans, ok: 1 }, ...[...new Set((x.opts || []).filter(t => t !== x.ans))].map(t => ({ t, ok: 0 }))]);
+      const ans = o.findIndex(v => v.ok);
+      const q = mockChoice(`<div class="q-panel"><p class="dim center mb">错题重做 · ${x.mod}</p>
+        <div class="center mb"><button class="pixel-btn blue audio-btn" id="rplay">▶ 播放录音</button>
+        <button class="pixel-btn ghost small" id="rslow">慢速重听</button></div>
+        <p class="dim center mb" style="font-size:13px">🗣 ${x.q}</p>`,
+        o.map(v => v.t), ans, x.exp || `正确答案：${x.ans}`);
+      q.origKey = origKey;
+      const om = q.mount;
+      q.mount = function () {
+        om();
+        const p1 = document.getElementById("rplay"), p2 = document.getElementById("rslow");
+        if (p1) p1.onclick = () => speakDialogue(tr, .95);
+        if (p2) p2.onclick = () => speakDialogue(tr, .68);
+        setTimeout(() => { if (document.getElementById("rplay")) speakDialogue(tr, .95); }, 400);
+      };
+      return q;
+    }
     if (x.opts && x.opts.length >= 2) {
       const o = shuffle([{ t: x.ans, ok: 1 }, ...[...new Set(x.opts.filter(t => t !== x.ans))].map(t => ({ t, ok: 0 }))]);   // 去重防两个相同干扰项
       const ans = o.findIndex(v => v.ok);
