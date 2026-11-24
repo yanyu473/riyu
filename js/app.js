@@ -123,7 +123,7 @@ function roleHints(text) {                        // 从旁白「男のアナウ
 }
 /* 把「男：…女：…」拆成逐句分段（旁白单独一段） */
 function splitDialogue(text) {
-  const t = String(text || "").replace(/\r/g, "");
+  const t = stripInlineOptions(String(text || "").replace(/\r/g, ""));
   const re = /(^|[。．.!?！？、\s\u3000])((?:男|女)(?:の学生|の先生|の人|[１２12])?|父|母|息子|娘|兄|姉|弟|妹|夫|妻|先生|学生|店長|部長|課長|社長|医者|監督|画家|経営者|農家|実習生|店員|係員|客|受付|アナウンサー|レポーター|ナレーター|司会|運転手)[：:]/g;
   const out = []; let last = 0, m, cur = null;
   while ((m = re.exec(t))) {
@@ -147,6 +147,33 @@ function stopSpeak() {
   try { speechSynthesis.cancel(); } catch (e) {}
   if (_kae) { clearInterval(_kae); _kae = null; }
 }
+function stripInlineOptions(t) {         // 原文末尾内嵌的「１．…２．…」是真卷面选项，不该被朗读
+  const s = String(t || "");
+  const pos = [];
+  const re2 = /[1-4１-４][.．、)）]/g;   // 1〜4 全部标记都要收集，否则 tail<2 会直接跳过
+  let m; while ((m = re2.exec(s))) pos.push(m.index);
+  if (pos.length < 2) return s;
+  const tail = pos.filter(x => x > s.length - 420);
+  for (let i = 0; i < tail.length - 1; i++) {
+    const seg = s.slice(tail[i]);
+    if (/^[1１][.．、)）][\s\S]{2,90}?[2２][.．、)）]/.test(seg)) return s.slice(0, tail[i]).trim();
+  }
+  return s;
+}
+function splitLongSegs(segs, cap) {       // 单句过长（>cap字）按句号再切，避免引擎中途停顿/卡顿
+  const lim = cap || 180, out = [];
+  segs.forEach(x => {
+    if (x.text.length <= lim) { out.push(x); return; }
+    const parts = x.text.split("。").map((t, i, arr) => (i < arr.length - 1 ? t + "。" : t)).filter(Boolean);
+    let buf = "";
+    parts.forEach(t => {
+      if (buf && (buf + t).length > lim) { out.push({ sp: x.sp, text: buf }); buf = t; }
+      else buf += t;
+    });
+    if (buf) out.push({ sp: x.sp, text: buf });
+  });
+  return out;
+}
 function mergeSameSpeaker(segs) {          // 相邻同一说话人并成一句：切句越碎，引擎重启次数越多，越卡
   const out = [];
   segs.forEach(x => {
@@ -159,8 +186,8 @@ function mergeSameSpeaker(segs) {          // 相邻同一说话人并成一句�
 function speakDialogue(text, rate, lang) {
   if (!("speechSynthesis" in window)) { toast("🚫 此浏览器不支持语音合成（vivo等国产浏览器已裁剪）——请用 Chrome 打开本页", "ach"); return; }
   refreshVoices();
-  const segs = splitDialogue(text);
-  if (segs.length < 2) return speak(text, rate, lang);        // 独白/单句：走原逻辑
+  let segs = splitDialogue(text);
+  if (segs.length < 2) segs = [{ sp: "", text: stripInlineOptions(String(text || "")).trim() }];   // 独白/单句：用旁白音色（尊重用户设置）
   stopSpeak();
   const tok = _dlgTok, hint = roleHints(text);
   const mv = pickMaleV(), fv = pickFemaleV(), nv = pickNarrV(), adj = voicePitchAdj();
@@ -181,7 +208,7 @@ function speakDialogue(text, rate, lang) {
   }));
   // 关键：一次性把全部句子排进语音队列，由浏览器连续播完。
   // 旧做法是 onend 里再播下一句——每句都要重新启动一次合成引擎，听感就是「一卡一卡」。
-  const todo = mergeSameSpeaker(segs);
+  const todo = splitLongSegs(mergeSameSpeaker(segs), 180);
   todo.forEach((s, idx) => {
     const g = resolveG(s.sp);
     const u = new SpeechSynthesisUtterance(s.text);
@@ -305,7 +332,7 @@ function answer(ok, explainHtml) {
   else {
     s.combo = 0; beep("bad");
     const m = s.qs[s.i] && s.qs[s.i].meta;
-    if (m) Store.addWrong({ mod: m.mod, q: m.q, opts: m.opts, ans: m.ans, pass: m.pass || "",
+    if (m) Store.addWrong({ mod: m.mod, q: m.q, opts: m.opts, ans: m.ans, pass: m.pass || m.t || "",
       exp: (explainHtml || "").replace(/<[^>]+>/g, " ").trim().slice(0, 200) });
   }
   const mk = s.qs[s.i] && s.qs[s.i].meta;
@@ -418,7 +445,7 @@ function realQ(it) {
     ${it.type === "listen" && !it.t ? `<p class="dim center mb" style="font-size:12px">⚠ 该题暂无音频，以听力原文形式呈现（降级模式）</p>` : ""}
     <p class="dim center mb" style="color:var(--pink)">❓ ${it.q} <span class="badge gold">${it.src || "往年真题"}</span></p>`;
   return {
-    meta: { mod, q: it.q, opts: it.opts, ans: it.opts[it.ans], pass: it.passage || "", srsW, pat },
+    meta: { mod, q: it.q, opts: it.opts, ans: it.opts[it.ans], pass: it.passage || "", t: it.t || "", srsW, pat },
     html: stem + it.opts.map((o, i) => `<button class="opt" data-i="${i}">${o}</button>`).join("") + `</div>`,
     mount() {
       if (isListen) {
@@ -753,7 +780,7 @@ function buildGramSession(unitNo) {
 /* ---------- 听力题目构造 ---------- */
 function listenQuestion(item) {
   return {
-    meta: { mod: "听力", q: item.q, opts: item.o, ans: item.o[item.a] },
+    meta: { mod: "听力", q: item.q, opts: item.o, ans: item.o[item.a], t: item.t || "" },
     html: `<div class="q-panel">
       <p class="dim center mb">🎧 听录音，选择正确答案 <span class="badge">自编题</span></p>
       <div class="center mb"><button class="pixel-btn blue audio-btn" id="play1">▶ 播放录音</button>
